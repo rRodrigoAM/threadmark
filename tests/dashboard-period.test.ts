@@ -218,6 +218,9 @@ function dashboardFixture() {
       "ticket-old-reopened",
       "2026-07-02T02:45:00.000Z",
     );
+  database
+    .prepare("UPDATE tickets SET status = 'in_progress' WHERE id = ?")
+    .run("ticket-old-reopened");
   createTicket({
     id: "ticket-restored-from-archive",
     client: "a",
@@ -320,9 +323,14 @@ test("dashboard interpreta o intervalo inclusivo em America/Sao_Paulo", () => {
     { priority: "urgent", count: 0 },
   ]);
   assert.equal(dashboard.statusCounts.find((item) => item.status === "new")?.count, 1);
+  assert.equal(dashboard.statusCounts.find((item) => item.status === "in_progress")?.count, 1);
   assert.equal(dashboard.statusCounts.find((item) => item.status === "resolved")?.count, 1);
   assert.equal(dashboard.statusCounts.find((item) => item.status === "cancelled")?.count, 1);
   assert.equal(dashboard.statusCounts.find((item) => item.status === "archived")?.count, 0);
+  assert.equal(
+    dashboard.statusCounts.reduce((total, item) => total + item.count, 0),
+    4,
+  );
   assert.equal(dashboard.operations.backlog, 3);
   assert.equal(dashboard.operations.resolutionRatePercent, 66.7);
   assert.equal(dashboard.operations.reopened, 1);
@@ -486,7 +494,7 @@ test("dashboard contabiliza arquivado pelo status terminal anterior", () => {
   assert.equal(dashboard.statusCounts.find((item) => item.status === "archived")?.count, 0);
   assert.equal(
     dashboard.statusCounts.reduce((total, item) => total + item.count, 0),
-    dashboard.totals.tickets,
+    4,
   );
 });
 

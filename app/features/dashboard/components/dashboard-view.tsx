@@ -720,9 +720,9 @@ export function DashboardView({
     status: (
       <Card className="min-w-0 gap-4 p-4 py-4 shadow-sm">
         <DashboardPanelHeader
-          description="Resultado dos tickets do período, mesmo após arquivar"
+          description="Tickets criados ou resolvidos no período, no status atual"
           icon={<ChartPie size={17} />}
-          title="Status dos tickets criados"
+          title="Status dos tickets do período"
         />
         {statusItems.length ? <DashboardStatusDonut items={statusItems} /> : <p className="flex min-h-32 items-center justify-center text-sm text-muted-foreground">Sem tickets categorizados.</p>}
       </Card>

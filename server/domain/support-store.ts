@@ -12147,6 +12147,34 @@ export class SupportStore {
       ...resolutionRangeParameters,
       ...assigneeParameters,
     ];
+    const statusPeriodSql = period
+      ? ` AND (
+            (t.created_at >= ? AND t.created_at < ?)
+            OR EXISTS (
+              SELECT 1
+              FROM ticket_events period_resolution
+              WHERE period_resolution.ticket_id = t.id
+                AND period_resolution.event_type IN ('ticket_created', 'status_changed')
+                AND period_resolution.to_status = 'resolved'
+                AND (
+                  period_resolution.from_status IS NULL
+                  OR period_resolution.from_status != 'archived'
+                )
+                AND period_resolution.occurred_at >= ?
+                AND period_resolution.occurred_at < ?
+            )
+          )`
+      : "";
+    const statusPeriodParameters = period
+      ? [
+          period.fromUtc,
+          period.toUtcExclusive,
+          period.fromUtc,
+          period.toUtcExclusive,
+        ]
+      : [];
+    const statusScopeSql = `${statusPeriodSql}${assigneeSql}`;
+    const statusScopeParameters = [...statusPeriodParameters, ...assigneeParameters];
     const ticketTotal = this.database
       .prepare(
         `SELECT COUNT(*) AS count
@@ -12261,10 +12289,10 @@ export class SupportStore {
          COUNT(*) AS count
          FROM tickets t
          JOIN clients c ON c.id = t.client_id
-         WHERE c.ignored_at IS NULL${createdScopeSql}
+         WHERE c.ignored_at IS NULL${statusScopeSql}
          GROUP BY 1`,
       )
-      .all(...createdScopeParameters) as Array<{ status: TicketStatus; count: number }>;
+      .all(...statusScopeParameters) as Array<{ status: TicketStatus; count: number }>;
     const statusMap = new Map(rawStatusCounts.map((item) => [item.status, item.count]));
     const rawPriorityCounts = this.database
       .prepare(

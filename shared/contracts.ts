@@ -1038,6 +1038,7 @@ export interface DashboardResponse {
     /** Native WhatsApp groups represented in the current ticket period. */
     groups: number;
   };
+  /** Current status of each ticket created or resolved in the selected period. */
   statusCounts: StatusCountDto[];
   priorityCounts: Array<{ priority: TicketPriority; count: number }>;
   ticketsByDay: Array<{ date: string; created: number; resolved: number }>;
