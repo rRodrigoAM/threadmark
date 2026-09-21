@@ -1,0 +1,14 @@
+.git
+.data
+node_modules
+dist
+.next
+.vinext
+release
+dist-desktop
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage
