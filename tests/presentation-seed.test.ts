@@ -10,12 +10,12 @@ import { SupportStore } from "../server/domain/index.js";
 import { loadConfig } from "../server/runtime/config.js";
 import { seedPresentationData } from "../server/seed.js";
 
-test("seed de apresentação cria ambiente rico sem executar o Codex", async () => {
+test("seed de apresentação cria ambiente rico sem executar agente", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "support-presentation-"));
   const config = loadConfig({
     SUPPORT_DATA_DIR: path.join(temporary, "presentation"),
     SUPPORT_WHATSAPP_ENABLED: "false",
-    SUPPORT_AGENT_ENABLED: "true",
+    SUPPORT_TRIAGE_AI_ENABLED: "true",
   });
 
   try {
@@ -35,8 +35,7 @@ test("seed de apresentação cria ambiente rico sem executar o Codex", async () 
             (SELECT COUNT(*) FROM tickets) AS tickets,
             (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved', 'cancelled', 'archived')) AS open_tickets,
             (SELECT COUNT(*) FROM tickets WHERE status = 'resolved') AS resolved_tickets,
-            (SELECT COUNT(*) FROM investigation_jobs) AS investigations,
-            (SELECT COUNT(*) FROM investigation_threads) AS threads,
+
             (SELECT COUNT(*) FROM suggestions) AS suggestions,
             (SELECT COUNT(*) FROM evidence_queries) AS evidence_queries,
             (SELECT COUNT(*) FROM messages WHERE triage_state = 'unreviewed') AS unreviewed,
@@ -53,8 +52,7 @@ test("seed de apresentação cria ambiente rico sem executar o Codex", async () 
         tickets: 11,
         open_tickets: 7,
         resolved_tickets: 4,
-        investigations: 0,
-        threads: 0,
+
         suggestions: 0,
         evidence_queries: 0,
         unreviewed: 0,
@@ -69,8 +67,7 @@ test("seed de apresentação cria ambiente rico sem executar o Codex", async () 
       assert.equal(openTickets.length, 7);
       for (const ticket of openTickets) {
         const detail = store.getTicketDetail(ticket.id);
-        assert.equal(detail.latestInvestigation, null);
-        assert.equal(detail.investigationThread, null);
+
         assert.deepEqual(detail.suggestions, []);
       }
 

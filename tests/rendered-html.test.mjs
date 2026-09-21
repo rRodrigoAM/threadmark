@@ -3,12 +3,11 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps WhatsApp conversations inbound-only in the UI", async () => {
-  const [detail, conversation, notes, product, assistant, api, page, threadmarkPage, layout] = await Promise.all([
+  const [detail, conversation, notes, product, api, page, threadmarkPage, layout] = await Promise.all([
     readFile(new URL("../app/features/tickets/components/ticket-detail.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/features/tickets/components/ticket-conversation.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/features/tickets/components/ticket-notes.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/features/tickets/components/ticket-product-panel.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/features/threadmark-ai/threadmark-ai.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/api.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/threadmark-page.tsx", import.meta.url), "utf8"),
@@ -33,15 +32,11 @@ test("keeps WhatsApp conversations inbound-only in the UI", async () => {
     detail,
     /sendMessage|\/messages\/outbound|Enviar ao WhatsApp|Responder no WhatsApp/i,
   );
-  assert.match(assistant, /Threadmark AI/);
-  assert.match(assistant, /Nada é enviado ao WhatsApp/);
-  assert.match(assistant, /Ações exigem confirmação/);
-  assert.doesNotMatch(assistant, /sendMessage|\/messages\/outbound|Enviar ao WhatsApp/i);
   assert.doesNotMatch(api, /sendMessage|\/send|\/messages\/outbound/i);
   assert.match(api, /http:\/\/127\.0\.0\.1:4317/);
   assert.doesNotMatch(api, /\/api\/tickets\/\$\{encodeURIComponent\(id\)\}\/investigate/);
   assert.match(api, /\/api\/tickets\/\$\{encodeURIComponent\(id\)\}\/notes/);
-  assert.match(api, /\/api\/threadmark-ai\/threads\/\$\{encodeURIComponent\(threadId\)\}\/messages/);
+  assert.doesNotMatch(api, /\/api\/threadmark-ai/);
   assert.match(page, /<ThreadmarkPage initialPath="\/conversations" \/>/);
   assert.match(threadmarkPage, /<SupportApp initialPath=\{initialPath\} \/>/);
   assert.match(layout, /lang="pt-BR"/);

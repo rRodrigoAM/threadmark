@@ -9,7 +9,6 @@ const bundledEntryFiles = new Set([
   "kanban-view.tsx",
   "settings-view.tsx",
   "ticket-detail.tsx",
-  "threadmark-ai.tsx",
 ]);
 
 function belongsToEntry(entryFile: string, relatedFile: string): boolean {

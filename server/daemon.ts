@@ -1,19 +1,14 @@
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
-import { CodexSupportAgent } from "./agent/codex-runner.js";
-import { InvestigationWorker } from "./agent/investigation-worker.js";
-import { InvestigationExecutionRegistry } from "./agent/investigation-execution-registry.js";
-import { ConfiguredSupportAgent } from "./agent/provider-router.js";
-import { AiProviderSettingsService } from "./agent/provider-settings.js";
+import { LocalAuthService, SetupChallengeService } from "./auth/index.js";
 import { createDatabase } from "./db/index.js";
 import { SupportStore } from "./domain/index.js";
 import { createSqliteInboundSink } from "./ingestion/sqlite-sink.js";
-import { ConnectedAppService } from "./integrations/index.js";
 import { startApiServer } from "./index.js";
 import { loadConfig } from "./runtime/config.js";
 import { waitForDaemonReady } from "./runtime/daemon-control.js";
-import { LocalSecretVault } from "./runtime/secret-vault.js";
+
 import {
   LocalSettingsFile,
   mergeConfiguredIdentities,
@@ -27,10 +22,8 @@ import {
 } from "./runtime/web-build-reload.js";
 import { createVinextWebProcessController } from "./runtime/web-process.js";
 import { waitForWebBuildReady } from "./runtime/web-readiness.js";
-import { DeepToolExecutor } from "./tools/deep-tool-executor.js";
-import { LocalToolService } from "./tools/local-tool-service.js";
 import { NotificationService } from "./notifications/index.js";
-import { TriageAiScheduler, TriageWorker } from "./triage/index.js";
+import { TriageAiScheduler } from "./triage/index.js";
 import { AudioTranscriptionService } from "./transcription/index.js";
 import { createInboundWhatsAppClient } from "./whatsapp/index.js";
 
@@ -57,20 +50,18 @@ async function main(): Promise<void> {
 
   const database = createDatabase(config.databasePath);
   const store = new SupportStore(database);
-  const secretVault = new LocalSecretVault(path.join(config.dataDir, "secrets"));
+  const authService = new LocalAuthService(database);
+  const setupChallenges = new SetupChallengeService(database);
+  if (authService.getSetupStatus().required && !setupChallenges.hasActive()) {
+    const issued = setupChallenges.issue();
+    console.log("Código de configuração inicial (válido por 30 minutos):");
+    console.log(issued.token);
+  }
   const notifications = new NotificationService(database);
-  const providerSettings = new AiProviderSettingsService(
-    database,
-    secretVault,
-    { codexBin: config.codexBin, attachmentsRoot: config.attachmentsDir },
-  );
-  const initialTriageProfile = providerSettings
-    .getProfiles()
-    .find((profile) => profile.taskKind === "triage");
   const currentTriageSettings = store.getTriageAiSettings();
   const expectedTriageSettings = {
-    enabled: initialTriageProfile?.enabled ?? config.triageAiEnabled,
-    model: initialTriageProfile?.model ?? config.triageAiModel,
+    enabled: config.triageAiEnabled,
+    model: config.triageAiModel,
     silenceWindowSeconds:
       currentTriageSettings.updatedBy === "default"
         ? Math.round(config.triageAiQuietMs / 1_000)
@@ -84,7 +75,7 @@ async function main(): Promise<void> {
   ) {
     store.updateTriageAiSettings({
       ...expectedTriageSettings,
-      actor: initialTriageProfile ? "ai-task-profile" : "environment",
+      actor: "environment",
     });
   }
   const resolvedStaff = resolveConfiguredStaffIdentities(store, staffIdentities);
@@ -130,7 +121,6 @@ async function main(): Promise<void> {
         media: { enabled: true, maxBytes: 20 * 1024 * 1024, timeoutMs: 30_000 },
       })
     : null;
-  const investigationExecutions = new InvestigationExecutionRegistry();
   const audioTranscription = new AudioTranscriptionService(database, {
     modelsDirectory: path.join(config.dataDir, "models", "transcription"),
     onError: (error) => console.error("Falha na transcrição local", error),
@@ -140,9 +130,10 @@ async function main(): Promise<void> {
     port: config.apiPort,
     store,
     database,
+    authService,
+    setupChallenges,
     runtimeState,
     qrReader: sink,
-    investigationExecutions,
     audioTranscription,
     requestShutdown: shutdownRequest.request,
     whatsappQrController: whatsapp
@@ -203,82 +194,12 @@ async function main(): Promise<void> {
   const backgroundTasks: Promise<void>[] = [];
   backgroundTasks.push(audioTranscription.run(controller.signal));
 
-  if (config.agentEnabled) {
-    const triageScheduler = new TriageAiScheduler(store, {
-      onError: (error) => console.error("Falha ao preparar triagem", error),
-    });
-    backgroundTasks.push(triageScheduler.run(controller.signal));
-    if (config.agentExecutor === "hermes") {
-      store.recoverRunningTriageAiJobs();
-      console.log("Triagem agentic delegada ao Hermes pela CLI headless.");
-    } else {
-      const codexAgent = new CodexSupportAgent({
-        codexBin: config.codexBin,
-        cwd: config.projectRoot,
-        dataDir: path.join(config.dataDir, "agent-runs"),
-        attachmentsRoot: config.attachmentsDir,
-        mcpToolLoopEnabled: config.codexMcpToolLoopEnabled,
-        databasePath: config.databasePath,
-        supportDataDir: config.dataDir,
-      });
-      const deepTools = new DeepToolExecutor(
-        new LocalToolService(database, secretVault),
-        {
-          database,
-          connectedApps: new ConnectedAppService(database, secretVault),
-          integrationVault: secretVault,
-        },
-      );
-      const agent = new ConfiguredSupportAgent(
-        database,
-        providerSettings,
-        codexAgent,
-        deepTools,
-      );
-      const investigations = new InvestigationWorker(store, agent, {
-        executionRegistry: investigationExecutions,
-        concurrency: config.agentConcurrency,
-        onEvent(event) {
-          if (event.type === "failed") {
-            console.error(`Investigação ${event.jobId} falhou: ${event.error}`);
-          }
-          if (
-            (event.type === "completed" || event.type === "failed") &&
-            event.ticketId &&
-            (event.jobKind === "automatic" || event.jobKind === "thread_turn")
-          ) {
-            void Promise.resolve().then(() => {
-              const ticket = store.getTicketDetail(event.ticketId!);
-              const investigation = event.jobKind === "thread_turn"
-                ? "Investigação aprofundada"
-                : "Investigação automática";
-              return notifications.createForAll({
-                title: event.type === "completed"
-                  ? `${investigation} concluída`
-                  : `${investigation} falhou`,
-                body: `#${ticket.number} · ${ticket.client.name}\n${ticket.title}`,
-                targetUrl: `/tickets/${ticket.number}`,
-                sourceType: "investigation",
-                sourceId: event.jobId,
-                idempotencyKey: `investigation:${event.jobId}:${event.type}`,
-                tone: event.type === "failed" ? "urgent" : "success",
-              });
-            }).catch((error) => {
-              console.error(`Falha ao notificar conclusão da investigação ${event.jobId}`, error);
-            });
-          }
-        },
-      });
-      backgroundTasks.push(investigations.run(controller.signal));
-    }
-  } else {
-    const triageWorker = new TriageWorker(store, {
-      onError: (candidate, error) => {
-        console.error(`Falha ao triar mensagem ${candidate.id}`, error);
-      },
-    });
-    backgroundTasks.push(triageWorker.run(controller.signal));
-  }
+  const triageScheduler = new TriageAiScheduler(store, {
+    onError: (error) => console.error("Falha ao preparar triagem", error),
+  });
+  backgroundTasks.push(triageScheduler.run(controller.signal));
+  store.recoverRunningTriageAiJobs();
+  console.log("Triagem delegada ao Hermes pela CLI headless.");
 
   let stopping = false;
   const stop = async (reason: string) => {
@@ -378,7 +299,11 @@ async function claimPidFile(pidPath: string): Promise<void> {
   await mkdir(path.dirname(pidPath), { recursive: true, mode: 0o700 });
   try {
     const previous = Number.parseInt(await readFile(pidPath, "utf8"), 10);
-    if (Number.isSafeInteger(previous) && isProcessRunning(previous)) {
+    if (
+      Number.isSafeInteger(previous) &&
+      previous !== process.pid &&
+      isProcessRunning(previous)
+    ) {
       throw new Error(`Threadmark já está rodando no PID ${previous}.`);
     }
     await rm(pidPath, { force: true });

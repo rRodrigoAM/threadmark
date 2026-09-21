@@ -8,7 +8,6 @@ import {
   PRODUCT_FORWARDING_KINDS,
   TICKET_PRIORITIES,
   TICKET_STATUSES,
-  type TicketListResponse,
 } from "../../shared/contracts.js";
 import { triageAnalysisSchema } from "../agent/validation.js";
 
@@ -161,6 +160,27 @@ const ticketNoteSchema = z
   .object({
     body: z.string().trim().min(1).max(4_000),
     clientNoteId: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+const externalTicketMessagesSchema = z
+  .object({
+    sourceType: z.literal("intercom_conversation"),
+    sourceConversationId: z.string().trim().min(1).max(200),
+    messages: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1).max(200),
+            author: z.string().trim().min(1).max(200),
+            authorRole: z.enum(["customer", "support"]),
+            body: z.string().trim().min(1).max(20_000),
+            occurredAt: z.string().datetime({ offset: true }),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
   })
   .strict();
 
@@ -656,6 +676,29 @@ async function executeTickets(
       identity,
     );
   }
+  if (action === "note-delete") {
+    const noteId = requirePositional(args, 2, "ID da nota interna");
+    return writeResult(
+      "tickets.note-delete",
+      await transport.request(
+        `/api/tickets/${encodeURIComponent(ticketId)}/notes/${encodeURIComponent(noteId)}`,
+        { method: "DELETE", ...identity },
+      ),
+      identity,
+    );
+  }
+  if (action === "external-messages-import") {
+    const body = externalTicketMessagesSchema.parse(await readInput(args, options));
+    return writeResult(
+      "tickets.external-messages-import",
+      await transport.request(`/api/tickets/${encodeURIComponent(ticketId)}/external-messages`, {
+        method: "POST",
+        body,
+        ...identity,
+      }),
+      identity,
+    );
+  }
   if (action === "product-forwarding") {
     const body = ticketProductForwardingSchema.parse(await readInput(args, options));
     return writeResult(
@@ -669,7 +712,7 @@ async function executeTickets(
     );
   }
   throw usageError(
-    "Use: threadmark tickets list|get|create|update|assign|status|category-add|category-remove|note-add|product-forwarding.",
+    "Use: threadmark tickets list|get|create|update|assign|status|category-add|category-remove|note-add|note-delete|external-messages-import|product-forwarding.",
   );
 }
 
@@ -805,21 +848,13 @@ async function resolveTicketId(
   const trimmed = reference.trim();
   const number = trimmed.match(/^#?(\d+)$/)?.[1];
   if (!number) return trimmed;
-  const params = new URLSearchParams({
-    q: number,
-    includeArchived: "true",
-    limit: "100",
-  });
-  const result = await transport.request<TicketListResponse>(withQuery("/api/tickets", params));
-  const matches = result.items.filter((ticket) => ticket.number === Number(number));
-  if (matches.length === 1) return matches[0]!.id;
-  if (matches.length > 1) {
-    throw new HeadlessCliError(
-      "ticket_ambiguous",
-      `Mais de um ticket possui o número #${number}.`,
-    );
+  const ticket = await transport.request<{ id: string; number: number }>(
+    `/api/tickets/by-number/${number}`,
+  );
+  if (ticket.number !== Number(number)) {
+    throw new HeadlessCliError("ticket_not_found", `Ticket #${number} não encontrado.`);
   }
-  throw new HeadlessCliError("ticket_not_found", `Ticket #${number} não encontrado.`);
+  return ticket.id;
 }
 
 async function readInput(
@@ -1040,6 +1075,8 @@ function headlessCapabilities() {
         "category-add",
         "category-remove",
         "note-add",
+        "note-delete",
+        "external-messages-import",
         "product-forwarding",
       ],
       categories: ["list", "create", "delete"],

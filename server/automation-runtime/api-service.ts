@@ -53,6 +53,7 @@ const connectedAppSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1_000).nullable().optional(),
   enabled: z.boolean().default(true),
+  // Legacy embedded-agent authorization is accepted then discarded.
   aiEnabled: z.boolean().optional(),
   endpoint: z.string().trim().max(2_000),
   secret: z.string().trim().max(16_384).optional(),
@@ -60,11 +61,12 @@ const connectedAppSchema = z.object({
   allowPrivateNetwork: z.boolean().optional(),
   mcpTools: z.array(z.object({
     name: z.string().trim().min(1).max(200),
-    aiEnabled: z.boolean(),
+    // Legacy embedded-agent authorization is accepted then discarded.
+    aiEnabled: z.boolean().optional(),
     automationEnabled: z.boolean(),
     confirmationRequired: z.boolean(),
-  }).strict()).max(200).optional(),
-}).strict();
+  }).strict().transform(({ aiEnabled: _legacyAiEnabled, ...tool }) => { void _legacyAiEnabled; return tool; })).max(200).optional(),
+}).strict().transform(({ aiEnabled: _legacyAiEnabled, ...input }) => { void _legacyAiEnabled; return input; });
 
 const decisionSchema = z.object({
   approved: z.boolean(),
@@ -572,7 +574,7 @@ function validateConnectedApps(
     }
     if (app.type === "intercom") {
       throw new AutomationApiError(
-        "O Intercom nativo está disponível no Threadmark AI, mas ainda não expõe etapas automáticas. Use uma conexão MCP para este fluxo.",
+        "O Intercom nativo ainda não expõe etapas automáticas. Use uma conexão MCP para este fluxo.",
       );
     }
     if (app.type !== "mcp_remote") continue;
@@ -631,7 +633,6 @@ function withActions(app: ConnectedAppDto) {
         description: tool.description,
         inputSchema: tool.inputSchema,
         annotations: tool.annotations,
-        aiEnabled: tool.aiEnabled,
         automationEnabled: tool.automationEnabled,
         confirmationRequired: tool.confirmationRequired,
       })),

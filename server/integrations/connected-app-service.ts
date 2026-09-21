@@ -25,14 +25,13 @@ export type ConnectedAppStatus = "active" | "disabled" | "error";
 export type ConnectedAppNativeProvider = "intercom";
 
 export type ConnectedAppMcpTool = McpDiscoveredTool & {
-  aiEnabled: boolean;
   automationEnabled: boolean;
   confirmationRequired: boolean;
 };
 
 export type ConnectedAppMcpToolPermission = Pick<
   ConnectedAppMcpTool,
-  "name" | "aiEnabled" | "automationEnabled" | "confirmationRequired"
+  "name" | "automationEnabled" | "confirmationRequired"
 >;
 
 export interface ConnectedAppDto {
@@ -41,8 +40,6 @@ export interface ConnectedAppDto {
   name: string;
   description: string | null;
   status: ConnectedAppStatus;
-  /** Explicit workspace authorization for external actions requested in Threadmark AI. */
-  aiEnabled: boolean;
   secretConfigured: boolean;
   endpointPreview: string | null;
   allowPrivateNetwork: boolean;
@@ -59,7 +56,6 @@ export interface ConnectedAppWriteInput {
   name: string;
   description?: string | null;
   enabled?: boolean;
-  aiEnabled?: boolean;
   endpoint: string;
   secret?: string;
   headers?: Record<string, string>;
@@ -80,6 +76,7 @@ type ConnectedAppRow = {
   name: string;
   description: string | null;
   enabled: number;
+  /** Inert legacy column retained because installed SQLite databases contain it. */
   ai_enabled: number;
   config_json: string;
   secret_ref: string | null;
@@ -91,20 +88,29 @@ type ConnectedAppRow = {
   updated_at: string;
 };
 
+type StoredMcpTool = ConnectedAppMcpTool & {
+  /** Persisted legacy authorization; parsed but never exposed or enforced. */
+  aiEnabled?: boolean;
+};
+
 type StoredConfig = {
   endpoint?: string;
   endpointPreview: string;
   publicHeaders: Array<{ name: string; value: string }>;
   allowPrivateNetwork: boolean;
-  mcpTools: ConnectedAppMcpTool[];
+  mcpTools: StoredMcpTool[];
 };
 
-const mcpToolPermissionSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  aiEnabled: z.boolean(),
-  automationEnabled: z.boolean(),
-  confirmationRequired: z.boolean(),
-}).strict();
+const mcpToolPermissionSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    // Accepted from old local clients but intentionally discarded.
+    aiEnabled: z.boolean().optional(),
+    automationEnabled: z.boolean(),
+    confirmationRequired: z.boolean(),
+  })
+  .strict()
+  .transform(({ aiEnabled: _legacyAiEnabled, ...permission }) => { void _legacyAiEnabled; return permission; });
 
 const writeSchema = z
   .object({
@@ -112,6 +118,7 @@ const writeSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().trim().max(1_000).nullable().optional(),
     enabled: z.boolean().default(true),
+    // Accepted from old local clients but intentionally discarded.
     aiEnabled: z.boolean().optional(),
     endpoint: z.string().trim().min(1).max(2_000),
     secret: z.string().trim().max(16_384).optional(),
@@ -119,7 +126,8 @@ const writeSchema = z
     allowPrivateNetwork: z.boolean().default(false),
     mcpTools: z.array(mcpToolPermissionSchema).max(200).optional(),
   })
-  .strict();
+  .strict()
+  .transform(({ aiEnabled: _legacyAiEnabled, ...input }) => { void _legacyAiEnabled; return input; });
 
 export class ConnectedAppSettingsError extends Error {
   constructor(
@@ -152,14 +160,6 @@ export class ConnectedAppService {
     return this.rows(
       `SELECT * FROM connected_apps
        ORDER BY enabled DESC, name COLLATE NOCASE, id`,
-    ).map(toDto);
-  }
-
-  listEnabledForAi(): ConnectedAppDto[] {
-    return this.rows(
-      `SELECT * FROM connected_apps
-       WHERE enabled = 1 AND ai_enabled = 1
-       ORDER BY name COLLATE NOCASE, id`,
     ).map(toDto);
   }
 
@@ -204,7 +204,7 @@ export class ConnectedAppService {
           parsed.name,
           parsed.description ?? null,
           parsed.enabled ? 1 : 0,
-          parsed.aiEnabled ? 1 : 0,
+          0,
           JSON.stringify(stored.config),
           stored.secretConfigured ? secretRef : null,
           stored.secretConfigured ? 1 : 0,
@@ -255,7 +255,7 @@ export class ConnectedAppService {
     this.database
       .prepare(
         `UPDATE connected_apps
-         SET name = ?, description = ?, enabled = ?, ai_enabled = ?, config_json = ?,
+         SET name = ?, description = ?, enabled = ?, config_json = ?,
              secret_ref = ?, secret_configured = ?, updated_by = ?, updated_at = ?,
              last_tested_at = NULL, last_test_status = NULL, last_test_message = NULL
          WHERE id = ?`,
@@ -264,7 +264,6 @@ export class ConnectedAppService {
         parsed.name,
         parsed.description ?? null,
         parsed.enabled ? 1 : 0,
-        parsed.aiEnabled === undefined ? existing.ai_enabled : parsed.aiEnabled ? 1 : 0,
         JSON.stringify(stored.config),
         stored.secretConfigured ? secretRef : null,
         stored.secretConfigured ? 1 : 0,
@@ -373,8 +372,7 @@ export class ConnectedAppService {
     id: string,
     toolName: string,
     argumentsValue: Record<string, unknown>,
-    mode: "ai" | "automation",
-    signal?: AbortSignal,
+    signal?: AbortSignal | "ai" | "automation",
   ): Promise<McpToolCallResult> {
     const row = this.requireRow(id);
     if (!row.enabled || row.provider_type !== "mcp_remote") {
@@ -382,9 +380,9 @@ export class ConnectedAppService {
     }
     const config = parseStoredConfig(row.config_json);
     const tool = config.mcpTools.find((candidate) => candidate.name === toolName);
-    if (!tool || (mode === "ai" ? !tool.aiEnabled : !tool.automationEnabled)) {
+    if (!tool || !tool.automationEnabled) {
       throw new ConnectedAppSettingsError(
-        `A ferramenta MCP “${toolName}” não foi autorizada para ${mode === "ai" ? "o Threadmark AI" : "automações"}.`,
+        `A ferramenta MCP “${toolName}” não foi autorizada para automações.`,
         "conflict",
       );
     }
@@ -398,7 +396,10 @@ export class ConnectedAppService {
       },
       tool.name,
       normalizeMcpArguments(tool.inputSchema, argumentsValue),
-      signal,
+      // Older local clients supplied an authorization mode here. It is parsed
+      // only for compatibility; MCP calls are now authorized solely above by
+      // automationEnabled and never by an embedded-agent mode.
+      typeof signal === "string" ? undefined : signal,
     );
     if (result.isError) {
       throw new ConnectedAppSettingsError(
@@ -487,7 +488,7 @@ export class ConnectedAppService {
       const saved = previous.get(tool.name);
       return {
         ...tool,
-        aiEnabled: saved?.aiEnabled ?? false,
+        ...(typeof saved?.aiEnabled === "boolean" ? { aiEnabled: saved.aiEnabled } : {}),
         automationEnabled: saved?.automationEnabled ?? false,
         confirmationRequired: saved?.confirmationRequired ?? !tool.annotations.readOnlyHint,
       };
@@ -495,7 +496,7 @@ export class ConnectedAppService {
     this.database
       .prepare("UPDATE connected_apps SET config_json = ?, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(config), new Date().toISOString(), row.id);
-    return `Servidor MCP conectado: ${config.mcpTools.length} ferramenta(s) descoberta(s). Revise quais podem ser usadas pela IA e por automações.`;
+    return `Servidor MCP conectado: ${config.mcpTools.length} ferramenta(s) descoberta(s). Revise quais podem ser usadas pelas automações.`;
   }
 
   private recordTest(id: string, succeeded: boolean, message: string, at: string): void {
@@ -590,7 +591,6 @@ function toDto(row: ConnectedAppRow): ConnectedAppDto {
     name: row.name,
     description: row.description,
     status: row.enabled ? (row.last_test_status === "failed" ? "error" : "active") : "disabled",
-    aiEnabled: Boolean(row.ai_enabled),
     secretConfigured: Boolean(row.secret_configured),
     endpointPreview: config.endpointPreview || null,
     allowPrivateNetwork: config.allowPrivateNetwork,
@@ -598,7 +598,7 @@ function toDto(row: ConnectedAppRow): ConnectedAppDto {
     lastTestSucceeded:
       row.last_test_status === null ? null : row.last_test_status === "success",
     lastTestMessage: row.last_test_message,
-    mcpTools: config.mcpTools,
+    mcpTools: config.mcpTools.map(toPublicMcpTool),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -653,9 +653,15 @@ function requireEndpoint(config: StoredConfig): string {
   return config.endpoint;
 }
 
-function isStoredMcpTool(value: unknown): value is ConnectedAppMcpTool {
+function toPublicMcpTool(tool: StoredMcpTool): ConnectedAppMcpTool {
+  const { aiEnabled: _legacyAiEnabled, ...publicTool } = tool;
+  void _legacyAiEnabled;
+  return publicTool;
+}
+
+function isStoredMcpTool(value: unknown): value is StoredMcpTool {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const tool = value as Partial<ConnectedAppMcpTool>;
+  const tool = value as Partial<StoredMcpTool>;
   return (
     typeof tool.name === "string" &&
     typeof tool.title === "string" &&
@@ -664,7 +670,7 @@ function isStoredMcpTool(value: unknown): value is ConnectedAppMcpTool {
     typeof tool.inputSchema === "object" &&
     Boolean(tool.annotations) &&
     typeof tool.annotations === "object" &&
-    typeof tool.aiEnabled === "boolean" &&
+    (tool.aiEnabled === undefined || typeof tool.aiEnabled === "boolean") &&
     typeof tool.automationEnabled === "boolean" &&
     typeof tool.confirmationRequired === "boolean"
   );

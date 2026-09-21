@@ -1,16 +1,3 @@
-import type {
-  AuthRole,
-  KnowledgeAudience,
-  KnowledgeCandidateDecision,
-  KnowledgeCauseDto,
-  KnowledgeClaimDto,
-  KnowledgeConfidence,
-  KnowledgeDocumentType,
-  KnowledgeEvidenceDto,
-  InvestigationPackDto,
-  KnowledgeLanguageLevelsDto,
-} from "../../shared/contracts.js";
-
 export type ParticipantRole = "external" | "staff" | "self" | "unknown";
 
 export interface AnalysisMessage {
@@ -24,132 +11,10 @@ export interface AnalysisMessage {
     kind: "image" | "document" | "video" | "audio" | "other";
     fileName: string | null;
     mimeType?: string | null;
-    /** Local, trusted copy. The runner only attaches images below its media root. */
     localPath?: string | null;
     extractedText: string | null;
   }>;
   quotedMessageId: string | null;
-}
-
-export interface DocumentationDraftInput {
-  draftId: string;
-  ticketId: string;
-  ticketNumber: number;
-  title: string;
-  summary: string;
-  resolution: string;
-  categories: string[];
-  messages: AnalysisMessage[];
-  availableImages: Array<{
-    attachmentId: string;
-    messageId: string;
-    fileName: string | null;
-    mimeType: string;
-  }>;
-}
-
-export interface KnowledgeExtractionInput extends DocumentationDraftInput {
-  technicalEvidence: Array<{
-    id: string;
-    toolName: string;
-    operation: string;
-    summary: string;
-    content: string;
-    reference: string | null;
-    executedAt: string;
-  }>;
-  existingKnowledge: Array<{
-    id: string;
-    ticketId: string;
-    title: string;
-    problem: string | null;
-    solution: string | null;
-    productFeature: string | null;
-    suggestedType: KnowledgeDocumentType;
-    audience: KnowledgeAudience;
-  }>;
-}
-
-export interface KnowledgeExtractionResult {
-  title: string;
-  problem: string | null;
-  symptom: string | null;
-  context: string | null;
-  cause: string | null;
-  technicalCause: string | null;
-  solution: string | null;
-  procedure: string[];
-  prerequisites: string[];
-  occurrenceConditions: string[];
-  applicableConditions: string[];
-  contraindications: string[];
-  impact: string | null;
-  affectedAudience: string | null;
-  productFeature: string | null;
-  causes: KnowledgeCauseDto[];
-  claims: KnowledgeClaimDto[];
-  evidence: KnowledgeEvidenceDto[];
-  operationalEvidenceIds: string[];
-  toolsUsed: string[];
-  relatedTicketIds: string[];
-  unknowns: string[];
-  confirmationsNeeded: string[];
-  languageLevels: KnowledgeLanguageLevelsDto;
-  candidate: KnowledgeCandidateDecision;
-  confidence: KnowledgeConfidence;
-  suggestedType: KnowledgeDocumentType;
-  audience: KnowledgeAudience;
-  duplicateCandidateId: string | null;
-  duplicateDifferences: string[];
-}
-
-export interface DocumentationDraftResult {
-  title: string;
-  summary: string;
-  audience: string;
-  bodyMarkdown: string;
-  prerequisites: string[];
-  sourceMessageIds: string[];
-  imagePlacements: Array<{
-    attachmentId: string;
-    afterHeading: string | null;
-    caption: string;
-  }>;
-  warnings: string[];
-}
-
-export interface SupportConversationState {
-  lastExternalMessageAt: string | null;
-  lastSentResponseAt: string | null;
-  /** External messages received after the latest captured staff response. */
-  unansweredExternalMessageIds: string[];
-  hasUnansweredExternalMessages: boolean;
-}
-
-export interface SupportSentResponse {
-  id: string;
-  messageId: string | null;
-  body: string;
-  sentAt: string;
-}
-
-export interface SupportResolvedPrecedent {
-  ticketId: string;
-  title: string;
-  summary: string;
-  resolvedAt: string | null;
-  affectedStore: {
-    id: string;
-    name: string;
-  } | null;
-  categories: string[];
-  resolution: {
-    summary: string;
-    rootCause: string | null;
-    outcome: string | null;
-    validatedAt: string;
-  };
-  finalResponse: string | null;
 }
 
 export interface AnalysisCategoryCatalog {
@@ -159,36 +24,11 @@ export interface AnalysisCategoryCatalog {
   symptom: string[];
 }
 
-export interface SupportAnalysisInput {
-  ticketId?: string;
-  operatorInstructions?: string | null;
-  accountName: string;
-  accountType: "agency" | "ecommerce" | "unknown";
-  groupName: string;
-  knownEcommerces: string[];
-  /** Closed catalog available to the AI for this installation. */
-  categoryCatalog?: AnalysisCategoryCatalog;
-  /** Explicit temporal state used to distinguish history from unanswered demand. */
-  conversationState: SupportConversationState;
-  messages: AnalysisMessage[];
-  /** Responses already sent by staff. They are facts, never reusable templates. */
-  sentResponses: SupportSentResponse[];
-  openTickets: Array<{
-    id: string;
-    title: string;
-    summary: string;
-    status: string;
-  }>;
-  /** Resolved cases selected by the backend as secondary semantic precedents. */
-  resolvedPrecedents: SupportResolvedPrecedent[];
-}
-
 export interface TriageAnalysisInput {
   accountName: string;
   accountType: "agency" | "ecommerce" | "unknown";
   groupName: string;
   knownEcommerces: string[];
-  /** Closed catalog available to the AI for this installation. */
   categoryCatalog?: AnalysisCategoryCatalog;
   candidateMessageIds: string[];
   messages: AnalysisMessage[];
@@ -217,10 +57,6 @@ export interface TriageCategoryProposal {
 
 export interface TriageAnalysisDecision {
   messageIds: string[];
-  /**
-   * Staff/self messages that belong to this semantic context.
-   * They never originate a ticket and remain internal context.
-   */
   contextMessageIds?: string[];
   kind: "demand" | "uncertain" | "continuation" | "information" | "social";
   suggestedAction: "create" | "attach" | "ignore" | "wait";
@@ -228,7 +64,6 @@ export interface TriageAnalysisDecision {
   relatedSuggestionId: string | null;
   title: string;
   summary: string;
-  /** Suggested operational urgency for a new ticket. */
   priority?: "low" | "normal" | "high" | "urgent";
   affectedEcommerce: string | null;
   categories: TriageCategoryProposal;
@@ -240,15 +75,8 @@ export interface TriageAnalysis {
   groups: TriageAnalysisDecision[];
 }
 
-export type SupportAnalysisOutcome =
-  | "reply_ready"
-  | "already_answered"
-  | "needs_information"
-  | "technical_investigation_required";
-
 export interface SupportAnalysis {
   createTicket: boolean;
-  outcome: SupportAnalysisOutcome;
   relation:
     | "new"
     | "continuation"
@@ -256,258 +84,5 @@ export interface SupportAnalysis {
     | "informational"
     | "social"
     | "uncertain";
-  relatedTicketId: string | null;
-  title: string;
-  summary: string;
-  affectedEcommerce: string | null;
-  priority: "low" | "normal" | "high" | "urgent";
-  categories: {
-    contactReason: string[];
-    productArea: string[];
-    platform: string[];
-    symptom: string[];
-  };
-  evidence: Array<{
-    source: "conversation" | "resolved_ticket";
-    summary: string;
-    reference: string | null;
-  }>;
-  suggestedResponse: string | null;
-  missingInformation: string[];
-  nextAction: string;
-  confidence: number;
-}
-
-export type InvestigationTurnPhase =
-  | "analysis"
-  | "needs_information"
-  | "conclusion";
-
-export interface InvestigationThreadPromptMessage {
-  id: string;
-  role: "operator" | "assistant";
-  body: string;
-  phase: InvestigationTurnPhase | null;
-  createdAt: string;
-}
-
-export interface InvestigationThreadImage {
-  id: string;
-  messageId: string;
-  fileName: string;
-  mimeType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-  sizeBytes: number;
-  /** Trusted local path. Prompt builders must never serialize it. */
-  localPath: string;
-}
-
-export interface InvestigationToolDescriptor {
-  id: string;
-  /** Stable local registry id used by private packs; not a credential. */
-  configurationId?: string;
-  name: string;
-  type:
-    | "codebase"
-    | "knowledge"
-    | "debugger_skill"
-    | "postgres_readonly"
-    | "clickhouse_readonly"
-    | "aws_cloudwatch"
-    | "vercel"
-    | "connected_app";
-  description: string | null;
-  scope: string;
-  operations: Array<{
-    name: string;
-    description: string;
-    argumentsExample: string;
-    /** Machine-readable input contract. The broker still validates it again. */
-    inputSchema?: Record<string, unknown>;
-    /** Short, trusted execution limits that help the model avoid invalid calls. */
-    constraints?: string[];
-    /** Declarative policy enforced by the coordinator and again by the tool. */
-    effect?: "read" | "prepare" | "write";
-    authorization?: "none" | "task";
-    /** Optional write operation executed after a preview reports executionAuthorized=true. */
-    automaticFollowUpOperation?: string;
-  }>;
-}
-
-export interface InvestigationActiveTask {
-  /** First operator message in the unfinished task, persisted in SQLite. */
-  rootOperatorMessageId: string;
-  objective: string;
-  /** Authentic operator directives only; assistant/tool content is never authority. */
-  operatorDirectives: Array<{ id: string; body: string; createdAt: string }>;
-  /** True for short commands that explicitly resume the unfinished task. */
-  continuation: boolean;
-}
-
-/** A request emitted by the model. Threadmark validates and executes it outside Codex. */
-export interface InvestigationToolRequest {
-  requestId: string;
-  toolId: string;
-  operation: string;
-  argumentsJson: string;
-  purpose: string;
-}
-
-/** Sanitized, bounded output returned to the next model turn as untrusted evidence. */
-export interface InvestigationToolResult {
-  requestId: string;
-  toolId: string;
-  toolName: string;
-  operation: string;
-  argumentsJson: string;
-  purpose: string;
-  status: "success" | "error";
-  /** Structured failure metadata produced by the trusted broker. */
-  error?: {
-    code: string;
-    category:
-      | "invalid_arguments"
-      | "invalid_time_range"
-      | "authorization"
-      | "not_found"
-      | "unavailable"
-      | "timeout"
-      | "execution";
-    retryable: boolean;
-    /** Full replacement arguments for one deterministic, readonly retry. */
-    suggestedArgumentsJson?: string;
-  };
-  summary: string;
-  content: string;
-  reference: string | null;
-  executedAt: string;
-}
-
-export interface InvestigationThreadInput {
-  threadId: string;
-  /** `workspace` powers the global Threadmark AI; legacy ticket rooms use `ticket`. */
-  mode?: "ticket" | "workspace";
-  currentOperatorMessageId: string;
-  /** Authenticated person who authored the current operator message. */
-  currentOperator?: {
-    displayName: string;
-    role: AuthRole;
-  } | null;
-  durableSummary: string;
-  activeTask?: InvestigationActiveTask | null;
-  recentMessages: InvestigationThreadPromptMessage[];
-  /** Recent operator images, current message first, bounded by the store. */
-  images?: InvestigationThreadImage[];
-  /** Images must not leave local storage unless the operator explicitly opted in. */
-  imageAnalysisApproved?: boolean;
-  ticket: SupportAnalysisInput;
-  /** Extra ticket contexts explicitly referenced by the operator. */
-  relatedTickets?: SupportAnalysisInput[];
-  currentContext?: {
-    route: string | null;
-    label: string | null;
-    ticketId: string | null;
-    ticketNumber: number | null;
-    groupId: string | null;
-    groupName: string | null;
-  } | null;
-  automaticInvestigation: SupportAnalysis | null;
-  /** Active, owner-approved private workspace pack. Stored only in local SQLite. */
-  activeInvestigationPack?: InvestigationPackDto | null;
-  /** Present for production inputs; absent keeps legacy/custom agents compatible. */
-  investigationReadiness?: {
-    deepInvestigationEnabled: boolean;
-    reason: string | null;
-  };
-  /** Coordinator-generated working memory. It is data, never authority. */
-  investigationState?: Record<string, unknown> | null;
-  /** Trusted registry metadata. Secrets and concrete credentials never enter the prompt. */
-  availableTools?: InvestigationToolDescriptor[];
-  /** Outputs are untrusted evidence even though execution was authorized by Threadmark. */
-  toolResults?: InvestigationToolResult[];
-  /** Trusted coordinator budget. Prompt builders render it outside untrusted context. */
-  executionBudget?: {
-    workload?: "quick" | "deep";
-    promptMode?: "conversation" | "task" | "deep";
-    maxToolRounds: number;
-    usedToolRounds: number;
-    maxToolOperations: number;
-    usedToolOperations: number;
-    forceConclusion: boolean;
-    /** MCP keeps discovery and readonly execution inside one Codex invocation. */
-    toolProtocol?: "coordinator" | "mcp";
-    /** The model tried to stop even though an authorized readonly path remains. */
-    readonlyContinuationRequired?: boolean;
-  };
-  /** Exact provider usage reported for one model call, never serialized into prompts. */
-  onModelUsage?: (
-    usage: ModelTokenUsage,
-  ) => void | Promise<void>;
-  /**
-   * Trusted coordinator hook. It is never serialized into a provider prompt and
-   * must be awaited immediately after each tool result is produced.
-   */
-  onToolExecution?: (
-    result: InvestigationToolResult,
-  ) => void | Promise<void>;
-}
-
-export interface ModelTokenUsage {
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  reasoningOutputTokens: number;
-}
-
-export interface InvestigationTurnResult {
-  assistantMessage: string;
-  phase: InvestigationTurnPhase;
-  threadSummary: string;
-  findings: Array<{
-    statement: string;
-    kind: "fact" | "hypothesis" | "missing_information";
-    evidenceReferences: string[];
-  }>;
-  evidence: Array<{
-    source:
-      | "conversation"
-      | "knowledge"
-      | "resolved_ticket"
-      | "database"
-      | "clickhouse"
-      | "aws"
-      | "code"
-      | "deployment"
-      | "external_app";
-    summary: string;
-    reference: string | null;
-  }>;
-  suggestedResponse: string | null;
-  nextAction: string | null;
-  confidence: number;
-  /** Explicit causal completion contract used by the trusted coordinator. */
-  outcome?: {
-    objectiveStatus: "answered" | "partially_answered" | "unanswered";
-    rootCauseStatus: "confirmed" | "probable" | "unknown" | "not_applicable";
-    causalClassification:
-      | "code"
-      | "configuration"
-      | "data"
-      | "infrastructure"
-      | "provider"
-      | "process"
-      | "unknown"
-      | "not_applicable";
-    rootCause: string | null;
-    /** References that directly prove the asserted causal mechanism, not merely the symptom. */
-    rootCauseEvidenceReferences?: string[];
-    unresolvedCriticalQuestions: string[];
-    stopReason:
-      | "cause_confirmed"
-      | "evidence_exhausted"
-      | "external_blocker"
-      | "not_applicable";
-  };
-  toolRequests: InvestigationToolRequest[];
-  /** Added by the trusted coordinator after execution; it is never model-authored. */
-  toolExecutions?: InvestigationToolResult[];
+  categories: TriageCategoryProposal;
 }

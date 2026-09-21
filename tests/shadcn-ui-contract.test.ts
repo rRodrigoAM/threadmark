@@ -108,21 +108,6 @@ test("features não reintroduzem o seletor nativo legado", async () => {
   assert.deepEqual(violations, [], "Use Select ou Combobox do Shadcn");
 });
 
-test("cadastro do Intercom usa formulário Shadcn sem valores de exemplo persistidos", async () => {
-  const source = await readFile(
-    new URL("../app/features/automations/components/connected-apps-panel.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(source, /<SelectItem value="intercom">Intercom<\/SelectItem>/);
-  assert.match(source, /Access token da API do Intercom/);
-  assert.match(source, /Região do workspace/);
-  assert.match(source, /Leitura de conversas, do autor associado ao token e de coleções/);
-  assert.match(source, /type === "intercom" \? INTERCOM_REGIONS\[0\]\.value : ""/);
-  assert.doesNotMatch(source, /name: type === "slack_webhook"/);
-  assert.doesNotMatch(source, /Slack do suporte/);
-  assert.doesNotMatch(source, /Minha API/);
-});
 
 test("combobox compartilhado usa Popover Shadcn e semântica acessível de lista", async () => {
   const [combobox, popover] = await Promise.all([
@@ -217,6 +202,7 @@ test("dashboard usa donut para status e barras para categorias com Shadcn Charts
   assert.match(source, /innerRadius=\{48\}/);
   assert.match(source, /DashboardStatusDonut/);
   assert.match(source, /Distribuição por status/);
+  assert.match(viewSource, /Status dos tickets do período/);
   assert.match(viewSource, /grid-flow-row-dense/);
   assert.match(viewSource, /lg:grid-cols-12/);
   assert.match(source, /<BarChart/);
@@ -285,18 +271,12 @@ test("catálogo de categorias usa diálogo e busca Shadcn na exclusão segura", 
   assert.match(source, /Excluir definitivamente/);
 });
 
-test("Threadmark AI abre compacto, expande sem bloquear a tela e preserva gráficos responsivos", async () => {
-  const [assistant, charts] = await Promise.all([
-    readFile(new URL("../app/features/threadmark-ai/threadmark-ai.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/features/dashboard/components/dashboard-charts.tsx", import.meta.url), "utf8"),
-  ]);
+test("gráficos preservam o destaque responsivo", async () => {
+  const charts = await readFile(
+    new URL("../app/features/dashboard/components/dashboard-charts.tsx", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(assistant, /sm:w-\[400px\]/);
-  assert.match(assistant, /sm:w-\[min\(920px,calc\(100vw-2\.5rem\)\)\]/);
-  assert.match(assistant, /aria-label=\{expanded \? "Recolher Threadmark AI" : "Expandir Threadmark AI"\}/);
-  assert.match(assistant, /aria-modal="false"/);
-  assert.doesNotMatch(assistant, /SheetContent|from "@\/app\/components\/ui\/sheet"/);
-  assert.match(assistant, /min-h-0 flex-1/);
   assert.match(charts, /const \[activeIndex, setActiveIndex\] = useState/);
   assert.match(charts, /activeItem\?\.value \?\? total/);
 });

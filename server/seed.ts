@@ -703,12 +703,11 @@ export function seedPresentationData(config = loadConfig()): void {
           (SELECT COUNT(*) FROM client_stores WHERE active = 1) AS stores,
           (SELECT COUNT(*) FROM whatsapp_groups) AS groups,
           (SELECT COUNT(*) FROM messages) AS messages,
-          (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved', 'cancelled', 'archived')) AS open_tickets,
-          (SELECT COUNT(*) FROM investigation_jobs) AS investigations`,
+          (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved', 'cancelled', 'archived')) AS open_tickets`,
       )
       .get() as Record<string, number>;
     console.log(
-      `Apresentação pronta em ${config.databasePath}: ${counts.clients} clientes, ${counts.stores} lojas, ${counts.groups} grupos, ${counts.messages} mensagens, ${counts.open_tickets} tickets abertos e ${counts.investigations} investigações.`,
+      `Apresentação pronta em ${config.databasePath}: ${counts.clients} clientes, ${counts.stores} lojas, ${counts.groups} grupos, ${counts.messages} mensagens e ${counts.open_tickets} tickets abertos.`,
     );
   } finally {
     database.close();

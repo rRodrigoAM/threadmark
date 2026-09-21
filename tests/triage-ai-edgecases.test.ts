@@ -30,7 +30,7 @@ function fixture(): Fixture {
   const store = new SupportStore(database);
   const account = store.upsertAccount({
     id: "edge-account",
-    phoneNumber: "+5547999999999",
+    phoneNumber: "+554****9999",
     displayName: "Acme Comercial",
   });
   const client = store.upsertClient({
@@ -49,7 +49,7 @@ function fixture(): Fixture {
   const customer = store.upsertParticipant({
     id: "edge-customer",
     externalJid: "5547888888888@s.whatsapp.net",
-    phoneE164: "+5547888888888",
+    phoneE164: "+554****8888",
     displayName: "Cliente",
   });
   store.addGroupParticipant(group.id, customer.id);
@@ -138,7 +138,7 @@ test("fallback libera e processa job recuperado depois que a IA foi desabilitada
     text: "O dashboard está com dados incorretos, podem verificar?",
   });
   assert.equal(scheduler(current).scheduleBatch(), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed && claimed.kind === "triage");
 
   current.store.updateTriageAiSettings({
@@ -203,7 +203,7 @@ test("resultado stale valida cobertura e libera todos os vínculos após restaur
     triageState: "context",
   });
   assert.equal(scheduler(current).scheduleBatch(), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed && claimed.kind === "triage");
 
   current.store.ignoreConversationMessages(current.groupId, {
@@ -262,13 +262,13 @@ test("snapshot de triagem inclui staff, self, alvo citado e adjacências sem tor
   const staff = current.store.upsertParticipant({
     id: "edge-staff",
     externalJid: "5500000000002@s.whatsapp.net",
-    phoneE164: "+5500000000002",
+    phoneE164: "+550****0002",
     displayName: "Operador Fictício Beta",
   });
   const self = current.store.upsertParticipant({
     id: "edge-self",
     externalJid: "self:commercial-account",
-    phoneE164: "+5500000000003",
+    phoneE164: "+550****0003",
     displayName: "Acme Comercial",
   });
   current.store.setStaffMember(staff.id, "Operador Fictício Beta");

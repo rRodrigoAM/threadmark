@@ -13,18 +13,14 @@ const envSchema = z.object({
   SUPPORT_API_HOST: z.string().default("127.0.0.1"),
   SUPPORT_API_PORT: z.coerce.number().int().min(1).max(65_535).default(4317),
   SUPPORT_WEB_ORIGIN: z.string().url().default("http://127.0.0.1:3000"),
+  SUPPORT_PUBLIC_ORIGIN: optionalUrlEnvironment(),
   SUPPORT_DATA_DIR: z.string().trim().optional(),
-  CODEX_BIN: z.string().default("codex"),
   SUPPORT_WHATSAPP_PHONE: z.string().default("commercial-account"),
   SUPPORT_WHATSAPP_NAME: z.string().default("Threadmark"),
   SUPPORT_MONITORED_GROUPS: z.string().default(""),
   SUPPORT_STAFF_IDENTITIES: z.string().default(""),
   SUPPORT_WHATSAPP_ENABLED: booleanEnvironment(true),
   SUPPORT_START_WEB: booleanEnvironment(true),
-  SUPPORT_AGENT_ENABLED: booleanEnvironment(true),
-  SUPPORT_AGENT_EXECUTOR: z.enum(["internal", "hermes"]).default("internal"),
-  SUPPORT_AGENT_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),
-  SUPPORT_CODEX_MCP_TOOL_LOOP_ENABLED: booleanEnvironment(true),
   SUPPORT_TRIAGE_AI_ENABLED: booleanEnvironment(true),
   SUPPORT_TRIAGE_AI_MODEL: z.string().trim().min(1).default("gpt-5.4-mini"),
   SUPPORT_TRIAGE_AI_QUIET_MS: z.coerce
@@ -34,8 +30,6 @@ const envSchema = z.object({
     .max(30 * 60_000)
     .default(180_000),
   SUPPORT_WORKSPACE_NAME: z.string().trim().min(1).default("Meu workspace"),
-  SUPPORT_CODE_ROOTS: z.string().default(""),
-  SUPPORT_VAULT_DIR: z.string().default(""),
 });
 
 export interface SupportConfig {
@@ -44,6 +38,7 @@ export interface SupportConfig {
   apiPort: number;
   apiUrl: string;
   webOrigin: string;
+  publicOrigin: string;
   dataDir: string;
   databasePath: string;
   attachmentsDir: string;
@@ -54,24 +49,16 @@ export interface SupportConfig {
   localSettingsPath: string;
   localAccessTokenPath: string;
   pidPath: string;
-  codexBin: string;
   whatsappPhone: string;
   whatsappName: string;
   monitoredGroupJids: string[];
   staffIdentities: string[];
   whatsappEnabled: boolean;
   startWeb: boolean;
-  agentEnabled: boolean;
-  agentExecutor: "internal" | "hermes";
-  agentConcurrency: number;
-  codexMcpToolLoopEnabled: boolean;
   triageAiEnabled: boolean;
   triageAiModel: string;
   triageAiQuietMs: number;
   workspaceName: string;
-  /** Legacy sources are exposed only as explicit import candidates. */
-  legacyCodeRoots: string[];
-  legacyVaultDirectory: string | null;
 }
 
 export function loadConfig(
@@ -99,6 +86,7 @@ export function loadConfig(
     apiPort: env.SUPPORT_API_PORT,
     apiUrl,
     webOrigin: env.SUPPORT_WEB_ORIGIN,
+    publicOrigin: env.SUPPORT_PUBLIC_ORIGIN ?? env.SUPPORT_WEB_ORIGIN,
     dataDir,
     databasePath: useLegacyPaths ? legacyDatabasePath : preferredDatabasePath,
     attachmentsDir: path.join(dataDir, "attachments"),
@@ -112,23 +100,16 @@ export function loadConfig(
       dataDir,
       useLegacyPaths ? "support-copilot.pid" : "threadmark.pid",
     ),
-    codexBin: env.CODEX_BIN,
     whatsappPhone: env.SUPPORT_WHATSAPP_PHONE,
     whatsappName: env.SUPPORT_WHATSAPP_NAME,
     monitoredGroupJids: commaSeparated(env.SUPPORT_MONITORED_GROUPS),
     staffIdentities: commaSeparated(env.SUPPORT_STAFF_IDENTITIES),
     whatsappEnabled: env.SUPPORT_WHATSAPP_ENABLED,
     startWeb: env.SUPPORT_START_WEB,
-    agentEnabled: env.SUPPORT_AGENT_ENABLED,
-    agentExecutor: env.SUPPORT_AGENT_EXECUTOR,
-    agentConcurrency: env.SUPPORT_AGENT_CONCURRENCY,
-    codexMcpToolLoopEnabled: env.SUPPORT_CODEX_MCP_TOOL_LOOP_ENABLED,
     triageAiEnabled: env.SUPPORT_TRIAGE_AI_ENABLED,
     triageAiModel: env.SUPPORT_TRIAGE_AI_MODEL,
     triageAiQuietMs: env.SUPPORT_TRIAGE_AI_QUIET_MS,
     workspaceName: env.SUPPORT_WORKSPACE_NAME,
-    legacyCodeRoots: commaSeparated(env.SUPPORT_CODE_ROOTS),
-    legacyVaultDirectory: env.SUPPORT_VAULT_DIR.trim() || null,
   };
 }
 
@@ -186,4 +167,11 @@ function booleanEnvironment(defaultValue: boolean) {
     .enum(["true", "false", "1", "0", "yes", "no"])
     .default(defaultValue ? "true" : "false")
     .transform((value) => new Set(["true", "1", "yes"]).has(value));
+}
+
+function optionalUrlEnvironment() {
+  return z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().url().optional(),
+  );
 }

@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import Database from "better-sqlite3";
 
-import { runDoctor, type DoctorOptions } from "../server/runtime/doctor.js";
+import { runDoctor } from "../server/runtime/doctor.js";
 import { renderLaunchAgentPlist } from "../server/runtime/launch-agent.js";
 import { rotateLogFile } from "../server/runtime/log-rotation.js";
 import {
@@ -101,130 +101,17 @@ test("doctor valida processo, API, assets e SQLite real", async () => {
     assert.equal(report.failures, 0);
     assert.equal(report.probes.find((probe) => probe.id === "sqlite")?.state, "ok");
     assert.equal(report.probes.find((probe) => probe.id === "whatsapp")?.state, "skipped");
-    assert.equal(report.probes.find((probe) => probe.id === "agent")?.state, "skipped");
+    assert.equal(report.probes.some((probe) => String(probe.id) === "agent"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("doctor testa somente os provedores selecionados pelos perfis ativos", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "threadmark-doctor-ai-"));
-  const config = {
-    ...fixtureConfig(root),
-    startWeb: false,
-    agentEnabled: true,
-    agentConcurrency: 2,
-  };
-  await mkdir(config.dataDir, { recursive: true });
-  const database = new Database(config.databasePath);
-  database.exec("CREATE TABLE health_probe (id INTEGER PRIMARY KEY)");
-  database.close();
-  const tested: string[] = [];
-  let directCodexProbes = 0;
-  const aiSettings = {
-    getProfiles: () => [
-      {
-        taskKind: "triage" as const,
-        connectionId: "openai-main",
-        model: "gpt-mini",
-        enabled: true,
-        updatedAt: "2026-07-18T12:00:00.000Z",
-      },
-      {
-        taskKind: "automatic" as const,
-        connectionId: "openai-main",
-        model: "gpt-mini",
-        enabled: true,
-        updatedAt: "2026-07-18T12:00:00.000Z",
-      },
-      {
-        taskKind: "deep" as const,
-        connectionId: "builtin-codex",
-        model: "default",
-        enabled: false,
-        updatedAt: "2026-07-18T12:00:00.000Z",
-      },
-    ],
-    listConnections: () => [
-      {
-        id: "openai-main",
-        label: "OpenAI principal",
-        providerId: "openai" as const,
-        baseUrl: null,
-        enabled: true,
-        hasSecret: true,
-        secretLastFour: "1234",
-        capabilities: {
-          automaticAnalysis: true,
-          triage: true,
-          structuredOutput: true,
-          vision: true,
-          localTools: false,
-          codebaseAccess: false,
-          deepInvestigation: true,
-        },
-        createdAt: "2026-07-18T12:00:00.000Z",
-        updatedAt: "2026-07-18T12:00:00.000Z",
-      },
-      {
-        id: "builtin-codex",
-        label: "Codex CLI",
-        providerId: "codex" as const,
-        baseUrl: null,
-        enabled: true,
-        hasSecret: false,
-        secretLastFour: null,
-        capabilities: {
-          automaticAnalysis: true,
-          triage: true,
-          structuredOutput: true,
-          vision: true,
-          localTools: true,
-          codebaseAccess: true,
-          deepInvestigation: true,
-        },
-        createdAt: "2026-07-18T12:00:00.000Z",
-        updatedAt: "2026-07-18T12:00:00.000Z",
-      },
-    ],
-    async testConnection(id: string) {
-      tested.push(id);
-      return { ok: true as const, message: "ok", models: ["gpt-mini"] };
-    },
-  } satisfies NonNullable<DoctorOptions["aiSettings"]>;
-
-  try {
-    const report = await runDoctor(config, {
-      runtimeState: {
-        ...offlineRuntimeState(),
-        phase: "online",
-        pid: 12345,
-      },
-      processRunning: () => true,
-      fetcher: (async () =>
-        Response.json({ ok: true, service: "threadmark-api" })) as typeof fetch,
-      commandProbe: async () => {
-        directCodexProbes += 1;
-        return "codex should not run";
-      },
-      aiSettings,
-    });
-    assert.deepEqual(tested, ["openai-main"]);
-    assert.equal(directCodexProbes, 0);
-    assert.equal(report.probes.find((probe) => probe.id === "agent")?.state, "ok");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("doctor não consulta provedores internos quando a triagem pertence ao Hermes", async () => {
+test("doctor não testa o executor externo nem providers aposentados", async () => {
   const config = {
     ...fixtureConfig("/tmp/threadmark-doctor-hermes"),
-    agentEnabled: true,
-    agentExecutor: "hermes" as const,
   };
-  let settingsReads = 0;
-  let commandProbes = 0;
+
   const report = await runDoctor(config, {
     runtimeState: {
       ...offlineRuntimeState(),
@@ -234,33 +121,9 @@ test("doctor não consulta provedores internos quando a triagem pertence ao Herm
     processRunning: () => true,
     fetcher: (async () =>
       Response.json({ ok: true, service: "threadmark-api" })) as typeof fetch,
-    commandProbe: async () => {
-      commandProbes += 1;
-      return "não deveria executar";
-    },
-    aiSettings: {
-      getProfiles() {
-        settingsReads += 1;
-        return [];
-      },
-      listConnections: () => [],
-      async testConnection() {
-        throw new Error("não deveria executar");
-      },
-    },
   });
 
-  assert.equal(settingsReads, 0);
-  assert.equal(commandProbes, 0);
-  assert.deepEqual(
-    report.probes.find((probe) => probe.id === "agent"),
-    {
-      id: "agent",
-      label: "Executor externo",
-      state: "skipped",
-      message: "Triagem delegada ao Hermes; modelos e ferramentas são verificados no ambiente do agente.",
-    },
-  );
+  assert.equal(report.probes.some((probe) => /agent|codex|provider/.test(probe.id)), false);
 });
 
 test("shim global é executável e expõe help e versão", async () => {
@@ -288,6 +151,7 @@ function fixtureConfig(projectRoot: string): SupportConfig {
     apiPort: 4317,
     apiUrl: "http://127.0.0.1:4317",
     webOrigin: "http://127.0.0.1:3000",
+    publicOrigin: "http://127.0.0.1:3000",
     dataDir,
     databasePath: path.join(dataDir, "threadmark.sqlite"),
     attachmentsDir: path.join(dataDir, "attachments"),
@@ -298,23 +162,16 @@ function fixtureConfig(projectRoot: string): SupportConfig {
     localSettingsPath: path.join(dataDir, "settings.json"),
     localAccessTokenPath: path.join(dataDir, "local-access.token"),
     pidPath: path.join(dataDir, "threadmark.pid"),
-    codexBin: "codex",
     whatsappPhone: "commercial-account",
     whatsappName: "Threadmark",
     monitoredGroupJids: [],
     staffIdentities: [],
     whatsappEnabled: false,
     startWeb: true,
-    agentEnabled: false,
-    agentExecutor: "internal",
-    agentConcurrency: 2,
-    codexMcpToolLoopEnabled: true,
     triageAiEnabled: false,
     triageAiModel: "gpt-5.4-mini",
     triageAiQuietMs: 30_000,
     workspaceName: "Meu workspace",
-    legacyCodeRoots: [],
-    legacyVaultDirectory: null,
   };
 }
 

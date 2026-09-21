@@ -552,9 +552,8 @@ export function catalogWithConnectedApps(
     });
   const connectedNodes: AutomationNodeDefinition[] = [];
   for (const connection of connections.filter((item) => item.status === "active")) {
-    // O conector nativo do Intercom é deliberadamente exclusivo do Threadmark AI.
-    // O agente consegue consultar contexto e propor rascunhos com confirmação;
-    // o motor de automações ainda não oferece esse mesmo fluxo seguro de aprovação.
+    // Conexões Intercom legadas não implementam ações no motor de automações.
+    // Preserve a configuração armazenada sem anunciar uma ação indisponível.
     if (connection.type === "intercom") continue;
     if (connection.type === "mcp_remote") {
       for (const action of connection.actions?.filter((item) => item.automationEnabled) ?? []) {

@@ -169,7 +169,6 @@ export type ConnectedAppSummary = {
   name: string;
   description: string | null;
   status: ConnectedAppStatus;
-  aiEnabled: boolean;
   secretConfigured: boolean;
   endpointPreview: string | null;
   allowPrivateNetwork?: boolean;
@@ -187,7 +186,6 @@ export type ConnectedAppSummary = {
       idempotentHint: boolean;
       openWorldHint: boolean;
     };
-    aiEnabled?: boolean;
     automationEnabled?: boolean;
     confirmationRequired?: boolean;
   }>;
@@ -202,14 +200,12 @@ export type UpsertConnectedAppInput = {
   name: string;
   description?: string | null;
   enabled: boolean;
-  aiEnabled: boolean;
   endpoint: string;
   secret?: string;
   headers?: Record<string, string>;
   allowPrivateNetwork?: boolean;
   mcpTools?: Array<{
     name: string;
-    aiEnabled: boolean;
     automationEnabled: boolean;
     confirmationRequired: boolean;
   }>;

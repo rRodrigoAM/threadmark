@@ -11,10 +11,6 @@ import { z } from "zod";
 
 import {
   CATEGORY_FACETS,
-  INVESTIGATION_THREAD_MESSAGE_MAX_LENGTH,
-  THREADMARK_AI_IMAGE_MAX_BYTES,
-  THREADMARK_AI_IMAGE_MAX_COUNT,
-  THREADMARK_AI_IMAGE_MIME_TYPES,
   CLIENT_KINDS,
   PRODUCT_FORWARDING_DESCRIPTION_MAX_LENGTH,
   PRODUCT_FORWARDING_EXTERNAL_REFERENCE_MAX_LENGTH,
@@ -25,15 +21,7 @@ import {
   TICKET_SUMMARY_MAX_LENGTH,
   TICKET_STATUSES,
   TICKET_TITLE_MAX_LENGTH,
-  DOCUMENTATION_DRAFT_STATUSES,
-  KNOWLEDGE_AUDIENCES,
-  KNOWLEDGE_CANDIDATE_DECISIONS,
-  KNOWLEDGE_CLAIM_KINDS,
-  KNOWLEDGE_CONFIDENCE_LEVELS,
-  KNOWLEDGE_DOCUMENT_TYPES,
-  KNOWLEDGE_EVIDENCE_SOURCES,
-  KNOWLEDGE_FEEDBACK_REASONS,
-  KNOWLEDGE_STATUSES,
+
   type ApiErrorResponse,
   type DashboardExportRowDto,
   type DashboardPeriodInput,
@@ -42,12 +30,7 @@ import {
   AUTH_ROLES,
   type AuthRole,
   type AuthUserDto,
-  type LocalToolTestResult,
-  LOCAL_TOOL_OPERATIONS,
-  LOCAL_TOOL_TYPES,
   type CategoryFacet,
-  type InvestigationPackOnboardingInput,
-  type InvestigationPackUpdateInput,
 } from "../shared/contracts.js";
 import {
   AuthError,
@@ -55,18 +38,7 @@ import {
   SetupChallengeService,
 } from "./auth/index.js";
 import { LocalAccessToken } from "./auth/local-access-token.js";
-import {
-  AiProviderSettingsService,
-  AiProviderSettingsError,
-  type AiConnectionWriteInput,
-  type AiTaskProfileDto,
-} from "./agent/provider-settings.js";
-import { InvestigationExecutionRegistry } from "./agent/investigation-execution-registry.js";
 import { triageAnalysisSchema } from "./agent/validation.js";
-import {
-  InvestigationPackError,
-  InvestigationPackService,
-} from "./agent/investigation-pack-service.js";
 import { createDatabase, type SupportDatabase } from "./db/index.js";
 import {
   DirectoryStore,
@@ -98,20 +70,8 @@ import {
   LocalStorageUsageService,
   type LocalStorageUsageReader,
 } from "./runtime/storage-usage.js";
-import {
-  LocalToolService,
-  LocalToolSettingsError,
-  type LocalToolWriteInput,
-} from "./tools/local-tool-service.js";
-import { DeepToolExecutor } from "./tools/deep-tool-executor.js";
 import { TRIAGE_PROMPT_VERSION } from "./triage/index.js";
-import { LegacyLocalToolImportService } from "./tools/legacy-tool-import.js";
 import { AudioTranscriptionService } from "./transcription/index.js";
-import {
-  cleanupStoredThreadmarkAiImages,
-  deleteThreadmarkAiImageFiles,
-  storeThreadmarkAiImages,
-} from "./media/threadmark-ai-images.js";
 import { AutomationRuntime } from "./automation-runtime/index.js";
 import {
   AutomationApiError,
@@ -120,11 +80,7 @@ import {
 import { AutomationValidationError } from "./automations/index.js";
 import { ConnectedAppSettingsError } from "./integrations/index.js";
 import { NotificationService } from "./notifications/index.js";
-import {
-  buildDocumentationDocx,
-  documentationDocxFileName,
-  type DocumentationDocxImage,
-} from "./documentation/docx-export.js";
+
 
 interface RuntimeStateReader {
   read(): Promise<RuntimeState>;
@@ -138,9 +94,6 @@ interface WhatsappQrController {
   renewQr(): Promise<void>;
 }
 
-interface LocalToolTester {
-  test(toolId: string, signal?: AbortSignal): Promise<LocalToolTestResult>;
-}
 
 export interface StartApiServerOptions {
   host?: string;
@@ -153,13 +106,7 @@ export interface StartApiServerOptions {
   setupChallenges?: SetupChallengeService;
   localAccessToken?: LocalAccessToken;
   localSettings?: LocalSettingsFile;
-  aiSettings?: AiProviderSettingsService;
-  tools?: LocalToolService;
-  legacyTools?: LegacyLocalToolImportService;
-  toolTester?: LocalToolTester;
-  investigationPacks?: InvestigationPackService;
   storageUsage?: LocalStorageUsageReader;
-  investigationExecutions?: InvestigationExecutionRegistry;
   requestShutdown?: (reason: string) => void | Promise<void>;
   whatsappQrController?: WhatsappQrController;
   audioTranscription?: AudioTranscriptionService;
@@ -199,13 +146,7 @@ interface ApiServices {
   setupChallenges?: SetupChallengeService;
   localAccessToken?: LocalAccessToken;
   localSettings?: LocalSettingsFile;
-  aiSettings?: AiProviderSettingsService;
-  tools?: LocalToolService;
-  legacyTools?: LegacyLocalToolImportService;
-  toolTester?: LocalToolTester;
-  investigationPacks?: InvestigationPackService;
   storageUsage?: LocalStorageUsageReader;
-  investigationExecutions?: InvestigationExecutionRegistry;
   requestShutdown?: (reason: string) => void | Promise<void>;
   whatsappQrController?: WhatsappQrController;
   audioTranscription?: AudioTranscriptionService;
@@ -268,6 +209,27 @@ const ticketInternalNoteInputSchema = z
   .object({
     body: z.string().trim().min(1).max(TICKET_INTERNAL_NOTE_MAX_LENGTH),
     clientNoteId: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+const externalTicketMessagesInputSchema = z
+  .object({
+    sourceType: z.literal("intercom_conversation"),
+    sourceConversationId: z.string().trim().min(1).max(200),
+    messages: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1).max(200),
+            author: z.string().trim().min(1).max(200),
+            authorRole: z.enum(["customer", "support"]),
+            body: z.string().trim().min(1).max(20_000),
+            occurredAt: z.string().datetime({ offset: true }),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
   })
   .strict();
 
@@ -448,61 +410,6 @@ const triageAiSettingsInputSchema = z
   })
   .strict();
 
-const threadmarkAiContextInputSchema = z
-  .object({
-    route: z.string().trim().max(500).nullable(),
-    label: z.string().trim().max(300).nullable(),
-    ticketId: z.string().trim().max(200).nullable(),
-    ticketNumber: z.number().int().positive().nullable(),
-    groupId: z.string().trim().max(200).nullable(),
-    groupName: z.string().trim().max(300).nullable(),
-  })
-  .strict()
-  .nullable();
-
-const investigationThreadMessageInputSchema = z
-  .object({
-    body: z
-      .string()
-      .trim()
-      .min(1)
-      .max(INVESTIGATION_THREAD_MESSAGE_MAX_LENGTH),
-    clientMessageId: z.string().trim().min(1).max(200).optional(),
-    context: threadmarkAiContextInputSchema.optional(),
-  })
-  .strict();
-
-const threadmarkAiMessageInputSchema = investigationThreadMessageInputSchema
-  .extend({
-    attachments: z
-      .array(
-        z.object({
-          fileName: z.string().trim().min(1).max(200),
-          mimeType: z.enum(THREADMARK_AI_IMAGE_MIME_TYPES),
-          dataBase64: z.string().min(1).max(Math.ceil(THREADMARK_AI_IMAGE_MAX_BYTES * 4 / 3) + 8),
-        }).strict(),
-      )
-      .max(THREADMARK_AI_IMAGE_MAX_COUNT)
-      .optional(),
-    allowImageAnalysis: z.boolean().optional(),
-  })
-  .superRefine((input, context) => {
-    if (input.attachments?.length && input.allowImageAnalysis !== true) {
-      context.addIssue({
-        code: "custom",
-        path: ["allowImageAnalysis"],
-        message: "Confirme o processamento das imagens pelo provedor de IA configurado.",
-      });
-    }
-  });
-
-const threadmarkAiThreadInputSchema = z
-  .object({
-    title: z.string().trim().min(1).max(160).optional(),
-    context: threadmarkAiContextInputSchema.optional(),
-  })
-  .strict();
-
 const setupInputSchema = z
   .object({
     bootstrapToken: z.string().trim().min(1),
@@ -524,84 +431,6 @@ const setupInputSchema = z
       });
     }
   });
-
-const documentationDraftInputSchema = z.object({
-  title: z.string().trim().min(1).max(160),
-  summary: z.string().trim().min(1).max(600),
-  audience: z.string().trim().min(1).max(200),
-  bodyMarkdown: z.string().trim().min(1).max(30_000),
-  prerequisites: z.array(z.string().trim().min(1).max(500)).max(20),
-  status: z.enum(DOCUMENTATION_DRAFT_STATUSES),
-});
-
-const knowledgeEvidenceSchema = z.object({
-  id: z.string().trim().min(1).max(100),
-  source: z.enum(KNOWLEDGE_EVIDENCE_SOURCES),
-  reference: z.string().trim().min(1).max(300),
-  excerpt: z.string().trim().min(1).max(2_000),
-  observedAt: z.string().datetime().nullable(),
-}).strict();
-
-const knowledgeClaimSchema = z.object({
-  id: z.string().trim().min(1).max(100),
-  kind: z.enum(KNOWLEDGE_CLAIM_KINDS),
-  statement: z.string().trim().min(1).max(2_000),
-  evidenceIds: z.array(z.string().trim().min(1).max(100)).max(50),
-  confidence: z.enum(KNOWLEDGE_CONFIDENCE_LEVELS),
-}).strict();
-
-const knowledgeCauseSchema = z.object({
-  description: z.string().trim().min(1).max(2_000),
-  confirmation: z.string().trim().min(1).max(2_000).nullable(),
-  solution: z.string().trim().min(1).max(2_000).nullable(),
-  evidenceIds: z.array(z.string().trim().min(1).max(100)).max(50),
-  confidence: z.enum(KNOWLEDGE_CONFIDENCE_LEVELS),
-}).strict();
-
-const nullableKnowledgeText = z.string().trim().min(1).max(5_000).nullable();
-const knowledgeStringList = z.array(z.string().trim().min(1).max(2_000)).max(100);
-const knowledgeObjectInputSchema = z.object({
-  status: z.enum(KNOWLEDGE_STATUSES),
-  candidate: z.enum(KNOWLEDGE_CANDIDATE_DECISIONS),
-  confidence: z.enum(KNOWLEDGE_CONFIDENCE_LEVELS),
-  suggestedType: z.enum(KNOWLEDGE_DOCUMENT_TYPES),
-  audience: z.enum(KNOWLEDGE_AUDIENCES),
-  title: z.string().trim().min(1).max(200),
-  problem: nullableKnowledgeText,
-  symptom: nullableKnowledgeText,
-  context: nullableKnowledgeText,
-  cause: nullableKnowledgeText,
-  technicalCause: nullableKnowledgeText,
-  solution: nullableKnowledgeText,
-  procedure: knowledgeStringList,
-  prerequisites: knowledgeStringList,
-  occurrenceConditions: knowledgeStringList,
-  applicableConditions: knowledgeStringList,
-  contraindications: knowledgeStringList,
-  impact: nullableKnowledgeText,
-  affectedAudience: nullableKnowledgeText,
-  productFeature: nullableKnowledgeText,
-  causes: z.array(knowledgeCauseSchema).max(30),
-  claims: z.array(knowledgeClaimSchema).max(100),
-  evidence: z.array(knowledgeEvidenceSchema).max(150),
-  operationalEvidenceIds: z.array(z.string().trim().min(1).max(100)).max(100),
-  toolsUsed: knowledgeStringList,
-  relatedTicketIds: z.array(z.string().trim().min(1).max(200)).max(100),
-  unknowns: knowledgeStringList,
-  confirmationsNeeded: knowledgeStringList,
-  languageLevels: z.object({
-    technical: nullableKnowledgeText,
-    operational: nullableKnowledgeText,
-    support: nullableKnowledgeText,
-    customer: nullableKnowledgeText,
-  }).strict(),
-}).strict();
-
-const knowledgeReviewInputSchema = z.object({
-  decision: z.enum(["APPROVE", "REJECT", "REQUEST_REGENERATION", "MARK_INCORRECT"]),
-  reasons: z.array(z.enum(KNOWLEDGE_FEEDBACK_REASONS)).max(8),
-  comment: z.string().trim().min(1).max(2_000).nullable().optional(),
-}).strict();
 
 const loginInputSchema = z
   .object({
@@ -662,50 +491,6 @@ const staffSettingsInputSchema = z
   })
   .strict();
 
-const aiProviderIdSchema = z.enum([
-  "codex",
-  "openai",
-  "anthropic",
-  "openrouter",
-  "ollama",
-]);
-
-const aiConnectionCreateSchema = z
-  .object({
-    label: z.string().trim().min(1).max(120),
-    providerId: aiProviderIdSchema,
-    baseUrl: z.union([z.string().url(), z.null()]).optional(),
-    enabled: z.boolean().optional(),
-    apiKey: z.string().trim().min(1).max(10_000).optional(),
-  })
-  .strict();
-
-const aiConnectionUpdateSchema = aiConnectionCreateSchema.partial().strict();
-
-const aiTaskProfilesInputSchema = z
-  .object({
-    items: z
-      .array(
-        z
-          .object({
-            taskKind: z.enum([
-              "triage",
-              "automatic",
-              "quick",
-              "deep",
-              "documentation",
-            ]),
-            connectionId: z.union([z.string().trim().min(1).max(200), z.null()]),
-            model: z.string().trim().min(1).max(200),
-            enabled: z.boolean(),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(5),
-  })
-  .strict();
-
 const audioTranscriptionSettingsInputSchema = z
   .object({
     enabled: z.boolean(),
@@ -720,61 +505,6 @@ const audioTranscriptionHistoryInputSchema = z
     limit: z.number().int().min(1).max(500).optional(),
   })
   .strict();
-
-const localToolWriteSchema = z
-  .object({
-    type: z.enum(LOCAL_TOOL_TYPES),
-    name: z.string().trim().min(1).max(120),
-    description: z.union([z.string().trim().max(1_000), z.null()]).optional(),
-    enabled: z.boolean().optional(),
-    deepEnabled: z.boolean().optional(),
-    allowedOperations: z.array(z.enum(LOCAL_TOOL_OPERATIONS)).max(20).optional(),
-    config: z.record(z.string(), z.unknown()),
-    secrets: z
-      .record(z.string(), z.union([z.string().min(1).max(20_000), z.null()]))
-      .optional(),
-  })
-  .strict();
-
-const localToolUpdateSchema = localToolWriteSchema
-  .partial()
-  .strict()
-  .refine((input) => Object.keys(input).length > 0, {
-    message: "Informe ao menos uma configuração para alterar",
-  });
-
-const legacyLocalToolImportSchema = z
-  .object({
-    candidateIds: z
-      .array(z.string().trim().min(1).max(200))
-      .min(1)
-      .max(100)
-      .transform((values) => [...new Set(values)]),
-  })
-  .strict();
-
-const investigationPackOnboardingSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  domain: z.string().trim().min(1).max(160),
-  purpose: z.string().trim().min(1).max(2_000),
-  goals: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
-  selectedToolIds: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
-  vocabulary: z.array(z.object({
-    term: z.string().trim().min(1).max(120),
-    meaning: z.string().trim().min(1).max(1_000),
-  }).strict()).max(100).optional(),
-  investigationExamples: z.array(
-    z.string().trim().min(1).max(500),
-  ).max(30).optional(),
-  includeCustomerDraft: z.boolean().optional(),
-}).strict();
-
-const investigationPackUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  manifest: z.record(z.string(), z.unknown()).optional(),
-}).strict().refine((input) => Object.keys(input).length > 0, {
-  message: "Informe ao menos uma alteração para o pack",
-});
 
 const backupInputSchema = z
   .object({ includeAttachments: z.boolean().default(false) })
@@ -813,16 +543,6 @@ function apiError(code: string, message: string, details?: unknown): ApiErrorRes
       ...(details === undefined ? {} : { details }),
     },
   };
-}
-
-function documentationImageType(
-  mimeType: string | undefined,
-): DocumentationDocxImage["type"] | null {
-  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
-  if (mimeType === "image/png") return "png";
-  if (mimeType === "image/gif") return "gif";
-  if (mimeType === "image/bmp") return "bmp";
-  return null;
 }
 
 function parseTicketStatuses(values: string[]): TicketStatus[] | undefined {
@@ -1022,17 +742,6 @@ function requireLocalSettings(services: ApiServices): LocalSettingsFile {
   return services.localSettings;
 }
 
-function requireAiSettings(services: ApiServices): AiProviderSettingsService {
-  if (!services.aiSettings) {
-    throw new DomainError(
-      "Configurações de IA indisponíveis",
-      "service_unavailable",
-      503,
-    );
-  }
-  return services.aiSettings;
-}
-
 function requireAudioTranscription(
   services: ApiServices,
 ): AudioTranscriptionService {
@@ -1044,54 +753,6 @@ function requireAudioTranscription(
     );
   }
   return services.audioTranscription;
-}
-
-function requireLocalTools(services: ApiServices): LocalToolService {
-  if (!services.tools) {
-    throw new DomainError(
-      "Registro de ferramentas locais indisponível",
-      "service_unavailable",
-      503,
-    );
-  }
-  return services.tools;
-}
-
-function requireLegacyLocalTools(
-  services: ApiServices,
-): LegacyLocalToolImportService {
-  if (!services.legacyTools) {
-    throw new DomainError(
-      "Recuperação de ferramentas antigas indisponível",
-      "service_unavailable",
-      503,
-    );
-  }
-  return services.legacyTools;
-}
-
-function requireLocalToolTester(services: ApiServices): LocalToolTester {
-  if (!services.toolTester) {
-    throw new DomainError(
-      "Teste de conexão das ferramentas indisponível",
-      "service_unavailable",
-      503,
-    );
-  }
-  return services.toolTester;
-}
-
-function requireInvestigationPacks(
-  services: ApiServices,
-): InvestigationPackService {
-  if (!services.investigationPacks) {
-    throw new DomainError(
-      "Packs de investigação indisponíveis",
-      "service_unavailable",
-      503,
-    );
-  }
-  return services.investigationPacks;
 }
 
 function requireStorageUsage(services: ApiServices): LocalStorageUsageReader {
@@ -1199,49 +860,6 @@ function actorFor(
     unauthenticatedFallback?.trim() ??
     "Operador local"
   );
-}
-
-function investigationMessageActorFor(
-  context: Context<ApiEnvironment>,
-): { userId: string | null; role: AuthRole } {
-  const identity = context.get("identity");
-  if (!identity) {
-    throw new AuthError("authentication_required", "Entre para continuar.");
-  }
-  return {
-    userId:
-      identity.kind === "user" || identity.kind === "agent"
-        ? identity.user.id
-        : null,
-    role: identity.user.role,
-  };
-}
-
-function threadmarkAiOwnerUserIdFor(
-  context: Context<ApiEnvironment>,
-): string | null {
-  const identity = context.get("identity");
-  if (!identity) {
-    throw new AuthError("authentication_required", "Entre para continuar.");
-  }
-  return identity.kind === "user" || identity.kind === "agent"
-    ? identity.user.id
-    : null;
-}
-
-function requireTicketInvestigationThread(
-  store: SupportStore,
-  threadId: string,
-) {
-  const thread = store.getInvestigationThread(threadId);
-  if (thread.scope !== "ticket") {
-    throw new DomainError(
-      "Conversa de investigação não encontrada",
-      "not_found",
-      404,
-    );
-  }
-  return thread;
 }
 
 function localMachineIdentity(): Extract<RequestIdentity, { kind: "local" }> {
@@ -1425,7 +1043,7 @@ function createApiAppInternal(
   app.use(
     "/api/*",
     cors({
-      origin: config.webOrigin,
+      origin: config.publicOrigin,
       allowMethods: ["GET", "PATCH", "POST", "PUT", "DELETE", "OPTIONS"],
       allowHeaders: [
         "Content-Type",
@@ -1446,7 +1064,7 @@ function createApiAppInternal(
     if (
       origin &&
       !["GET", "HEAD", "OPTIONS"].includes(context.req.method) &&
-      origin !== config.webOrigin
+      origin !== config.publicOrigin
     ) {
       return context.json(apiError("forbidden", "Origem não autorizada"), 403);
     }
@@ -1579,7 +1197,7 @@ function createApiAppInternal(
       password: input.password,
     });
     challenges.consume();
-    setSessionCookie(context, issued.token, issued.expiresAt, config.webOrigin);
+    setSessionCookie(context, issued.token, issued.expiresAt, config.publicOrigin);
     return context.json(sessionResponse(store.database, issued), 201);
   });
 
@@ -1589,7 +1207,7 @@ function createApiAppInternal(
       username: input.username ?? input.login ?? "",
       password: input.password,
     });
-    setSessionCookie(context, issued.token, issued.expiresAt, config.webOrigin);
+    setSessionCookie(context, issued.token, issued.expiresAt, config.publicOrigin);
     return context.json(sessionResponse(store.database, issued));
   });
 
@@ -1618,7 +1236,7 @@ function createApiAppInternal(
       input.currentPassword,
       input.password,
     );
-    setSessionCookie(context, issued.token, issued.expiresAt, config.webOrigin);
+    setSessionCookie(context, issued.token, issued.expiresAt, config.publicOrigin);
     return context.json(sessionResponse(store.database, issued));
   });
 
@@ -1660,8 +1278,6 @@ function createApiAppInternal(
     const fallback: RuntimeStatusDto = {
       ...store.getRuntimeStatus(),
       whatsappEnabled: config.whatsappEnabled,
-      agentEnabled: config.agentEnabled,
-      agentExecutor: config.agentExecutor,
     };
     const runtime = runtimeState
       ? runtimeFromFile(await runtimeState.read(), fallback)
@@ -1786,64 +1402,6 @@ function createApiAppInternal(
     return context.json(staffSettingsResponse(store, input.identities, true));
   });
 
-  app.get("/api/ai/connections", (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json({ items: requireAiSettings(services).listConnections() });
-  });
-
-  app.post("/api/ai/connections", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = aiConnectionCreateSchema.parse(await context.req.json());
-    return context.json(
-      await requireAiSettings(services).createConnection(
-        input as AiConnectionWriteInput,
-        actorFor(context),
-      ),
-      201,
-    );
-  });
-
-  app.patch("/api/ai/connections/:id", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = aiConnectionUpdateSchema.parse(await context.req.json());
-    return context.json(
-      await requireAiSettings(services).updateConnection(
-        context.req.param("id"),
-        input as Partial<AiConnectionWriteInput>,
-        actorFor(context),
-      ),
-    );
-  });
-
-  app.delete("/api/ai/connections/:id", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    await requireAiSettings(services).deleteConnection(context.req.param("id"));
-    return context.json({ ok: true as const });
-  });
-
-  app.post("/api/ai/connections/:id/test", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json(
-      await requireAiSettings(services).testConnection(context.req.param("id")),
-    );
-  });
-
-  app.get("/api/ai/task-profiles", (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json({ items: requireAiSettings(services).getProfiles() });
-  });
-
-  app.put("/api/ai/task-profiles", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = aiTaskProfilesInputSchema.parse(await context.req.json());
-    return context.json({
-      items: requireAiSettings(services).updateProfiles(
-        input.items as Array<Omit<AiTaskProfileDto, "updatedAt">>,
-        actorFor(context),
-      ),
-    });
-  });
-
   app.get("/api/ai/audio-transcription", async (context) => {
     requireRole(context, ["owner", "admin"]);
     return context.json(await requireAudioTranscription(services).getSettings());
@@ -1965,109 +1523,6 @@ function createApiAppInternal(
       );
     }
     return context.json({ queued: true as const });
-  });
-
-  app.get("/api/tools", (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json({ items: requireLocalTools(services).list() });
-  });
-
-  app.get("/api/tools/legacy-candidates", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json({
-      items: await requireLegacyLocalTools(services).listCandidates(),
-    });
-  });
-
-  app.post("/api/tools/legacy-import", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = legacyLocalToolImportSchema.parse(await context.req.json());
-    return context.json(
-      await requireLegacyLocalTools(services).importCandidates(
-        input.candidateIds,
-        actorFor(context),
-      ),
-    );
-  });
-
-  app.post("/api/tools", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = localToolWriteSchema.parse(await context.req.json());
-    return context.json(
-      await requireLocalTools(services).create(
-        input as unknown as LocalToolWriteInput,
-        actorFor(context),
-      ),
-      201,
-    );
-  });
-
-  app.patch("/api/tools/:id", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = localToolUpdateSchema.parse(await context.req.json());
-    return context.json(
-      await requireLocalTools(services).update(
-        context.req.param("id"),
-        input as Partial<LocalToolWriteInput>,
-        actorFor(context),
-      ),
-    );
-  });
-
-  app.delete("/api/tools/:id", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    await requireLocalTools(services).delete(context.req.param("id"));
-    return context.json({ ok: true as const });
-  });
-
-  app.post("/api/tools/:id/test", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json(
-      await requireLocalToolTester(services).test(context.req.param("id")),
-    );
-  });
-
-  app.get("/api/investigation-packs", (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const packs = requireInvestigationPacks(services);
-    return context.json({ items: packs.list(), active: packs.getActive() });
-  });
-
-  app.post("/api/investigation-packs/onboarding", async (context) => {
-    const identity = requireRole(context, ["owner", "admin"]);
-    const input = investigationPackOnboardingSchema.parse(await context.req.json());
-    return context.json(
-      requireInvestigationPacks(services).createDraft(
-        input as InvestigationPackOnboardingInput,
-        identity.user.id,
-      ),
-      201,
-    );
-  });
-
-  app.patch("/api/investigation-packs/:id", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    const input = investigationPackUpdateSchema.parse(await context.req.json());
-    return context.json(
-      requireInvestigationPacks(services).updateDraft(
-        context.req.param("id"),
-        input as unknown as InvestigationPackUpdateInput,
-      ),
-    );
-  });
-
-  app.post("/api/investigation-packs/:id/probe", async (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json(
-      await requireInvestigationPacks(services).probe(context.req.param("id")),
-    );
-  });
-
-  app.post("/api/investigation-packs/:id/activate", (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json(
-      requireInvestigationPacks(services).activate(context.req.param("id")),
-    );
   });
 
   app.post("/api/settings/backup", async (context) => {
@@ -2391,25 +1846,7 @@ function createApiAppInternal(
     });
   });
 
-  const triageSettingsPayload = () => {
-    const settings = store.getTriageAiSettings();
-    const profile = services.aiSettings
-      ?.getProfiles()
-      .find((item) => item.taskKind === "triage");
-    const connection = profile?.connectionId
-      ? services.aiSettings
-          ?.listConnections()
-          .find((item) => item.id === profile.connectionId)
-      : null;
-    return {
-      ...settings,
-      enabled: profile?.enabled ?? settings.enabled,
-      model: profile?.model ?? settings.model,
-      connectionId: profile?.connectionId ?? null,
-      connectionLabel: connection?.label ?? null,
-      providerId: connection?.providerId ?? null,
-    };
-  };
+  const triageSettingsPayload = () => store.getTriageAiSettings();
 
   app.get("/api/triage/settings", (context) =>
     context.json(triageSettingsPayload()),
@@ -2418,20 +1855,6 @@ function createApiAppInternal(
   app.put("/api/triage/settings", async (context) => {
     requireRole(context, ["owner", "admin"]);
     const input = triageAiSettingsInputSchema.parse(await context.req.json());
-    if (services.aiSettings) {
-      const current = services.aiSettings
-        .getProfiles()
-        .find((item) => item.taskKind === "triage");
-      services.aiSettings.updateProfiles(
-        [{
-          taskKind: "triage",
-          connectionId: current?.connectionId ?? null,
-          model: input.model,
-          enabled: input.enabled,
-        }],
-        actorFor(context, input.actor),
-      );
-    }
     store.updateTriageAiSettings({
       ...input,
       actor: actorFor(context, input.actor),
@@ -2669,139 +2092,14 @@ function createApiAppInternal(
     );
   });
 
+  app.get("/api/tickets/by-number/:number", (context) => {
+    const ticket = store.getTicketByNumber(Number(context.req.param("number")));
+    return context.json({ id: ticket.id, number: ticket.number });
+  });
+
   app.get("/api/tickets/:id", (context) =>
     context.json(store.getTicketDetail(context.req.param("id"))),
   );
-
-  app.post("/api/tickets/:id/documentation", (context) =>
-    {
-      services.aiSettings?.assertTaskReady("documentation");
-      return context.json(
-        store.queueDocumentationDraft(
-          context.req.param("id"),
-          actorFor(context),
-        ),
-        202,
-      );
-    },
-  );
-
-  app.post("/api/tickets/:id/knowledge", (context) => {
-    services.aiSettings?.assertTaskReady("documentation");
-    return context.json(
-      store.queueDocumentationDraft(context.req.param("id"), actorFor(context)),
-      202,
-    );
-  });
-
-  app.get("/api/tickets/:id/knowledge", (context) =>
-    context.json(store.getKnowledgeObjectByTicket(context.req.param("id"))),
-  );
-
-  app.patch("/api/knowledge/:id", async (context) => {
-    const input = knowledgeObjectInputSchema.parse(await context.req.json());
-    return context.json(
-      store.updateKnowledgeObject(context.req.param("id"), input, actorFor(context)),
-    );
-  });
-
-  app.post("/api/knowledge/:id/review", async (context) => {
-    const input = knowledgeReviewInputSchema.parse(await context.req.json());
-    return context.json(
-      store.reviewKnowledgeObject(context.req.param("id"), input, actorFor(context)),
-    );
-  });
-
-  app.post("/api/knowledge/:id/documentation", (context) =>
-    context.json(
-      store.queueKnowledgeDocument(context.req.param("id"), actorFor(context)),
-      202,
-    ),
-  );
-
-  app.get("/api/documentation", (context) => {
-    const url = new URL(context.req.url);
-    return context.json(store.listDocumentationDrafts({
-      query: url.searchParams.get("q") || undefined,
-      includeArchived: url.searchParams.get("includeArchived") === "true",
-    }));
-  });
-
-  app.get("/api/documentation/:id/export.docx", async (context) => {
-    const draft = store.getDocumentationDraft(context.req.param("id"));
-    const images: DocumentationDocxImage[] = [];
-    for (const placement of draft.images) {
-      const attachment = store.database
-        .prepare(
-          `SELECT local_path, mime_type, file_name, available
-           FROM attachments WHERE id = ?`,
-        )
-        .get(placement.attachmentId) as
-        | { local_path: string; mime_type: string; file_name: string | null; available: number }
-        | undefined;
-      const type = documentationImageType(attachment?.mime_type);
-      if (!attachment?.available || !type) continue;
-
-      try {
-        const [trustedRoot, filePath] = await Promise.all([
-          realpath(config.attachmentsDir),
-          realpath(attachment.local_path),
-        ]);
-        const pathWithinRoot = relative(trustedRoot, filePath);
-        if (pathWithinRoot.startsWith("..") || isAbsolute(pathWithinRoot)) continue;
-        images.push({
-          data: new Uint8Array(await readFile(filePath)),
-          type,
-          caption: placement.caption,
-          afterHeading: placement.afterHeading,
-          fileName: attachment.file_name,
-        });
-      } catch {
-        // Uma imagem indisponível não deve impedir a exportação do texto revisado.
-      }
-    }
-
-    const bytes = await buildDocumentationDocx(draft, images);
-    const body = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(body).set(bytes);
-    const fileName = documentationDocxFileName(draft.title || draft.ticketTitle);
-    return new Response(body, {
-      headers: {
-        "Cache-Control": "private, no-store, max-age=0",
-        "Content-Disposition": `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
-  });
-
-  app.get("/api/documentation/:id", (context) =>
-    context.json(store.getDocumentationDraft(context.req.param("id"))),
-  );
-
-  app.patch("/api/documentation/:id", async (context) => {
-    const input = documentationDraftInputSchema.parse(await context.req.json());
-    return context.json(store.updateDocumentationDraft(context.req.param("id"), {
-      ...input,
-      actor: actorFor(context),
-    }));
-  });
-
-  app.delete("/api/documentation/:id", (context) => {
-    requireRole(context, ["owner", "admin"]);
-    return context.json(
-      store.deleteDocumentationDraft(context.req.param("id")),
-    );
-  });
-
-  app.post("/api/documentation/:id/regenerate", (context) => {
-    services.aiSettings?.assertTaskReady("documentation");
-    const draft = store.getDocumentationDraft(context.req.param("id"));
-    return context.json(
-      store.queueDocumentationDraft(draft.ticketId, actorFor(context)),
-      202,
-    );
-  });
 
   app.patch("/api/tickets/:id", async (context) => {
     const input = ticketMetadataInputSchema.parse(await context.req.json());
@@ -2911,6 +2209,16 @@ function createApiAppInternal(
     );
   });
 
+  app.post("/api/tickets/:id/external-messages", async (context) => {
+    const input = externalTicketMessagesInputSchema.parse(await context.req.json());
+    return context.json(
+      store.importExternalSourceMessagesToTicket(context.req.param("id"), {
+        ...input,
+        actor: actorFor(context),
+      }),
+    );
+  });
+
   app.patch("/api/tickets/:id/notes/:noteId", async (context) => {
     const input = ticketInternalNoteUpdateSchema.parse(
       await context.req.json(),
@@ -2948,165 +2256,6 @@ function createApiAppInternal(
     );
   });
 
-  app.post("/api/tickets/:id/investigation-thread", (context) =>
-    context.json(
-      store.getOrCreateInvestigationThread(context.req.param("id")),
-    ),
-  );
-
-  app.get("/api/threadmark-ai/threads", (context) =>
-    context.json(
-      store.listThreadmarkAiThreads(threadmarkAiOwnerUserIdFor(context)),
-    ),
-  );
-
-  app.post("/api/threadmark-ai/threads", async (context) => {
-    const raw = await context.req.text();
-    const input = threadmarkAiThreadInputSchema.parse(raw ? JSON.parse(raw) : {});
-    return context.json(
-      store.createThreadmarkAiThread(
-        input,
-        actorFor(context),
-        threadmarkAiOwnerUserIdFor(context),
-      ),
-      201,
-    );
-  });
-
-  app.post("/api/threadmark-ai/current", async (context) => {
-    const raw = await context.req.text();
-    const input = threadmarkAiThreadInputSchema.parse(raw ? JSON.parse(raw) : {});
-    return context.json(
-      store.getOrCreateThreadmarkAiThread(
-        actorFor(context),
-        input.context ?? null,
-        threadmarkAiOwnerUserIdFor(context),
-      ),
-    );
-  });
-
-  app.get("/api/threadmark-ai/threads/:id", (context) =>
-    context.json(
-      store.getThreadmarkAiThread(
-        context.req.param("id"),
-        threadmarkAiOwnerUserIdFor(context),
-      ),
-    ),
-  );
-
-  app.post("/api/threadmark-ai/threads/:id/read", (context) =>
-    context.json(
-      store.markThreadmarkAiThreadRead(
-        context.req.param("id"),
-        threadmarkAiOwnerUserIdFor(context),
-      ),
-    ),
-  );
-
-  app.delete("/api/threadmark-ai/threads/:id", async (context) => {
-    const deleted = store.deleteThreadmarkAiThread(
-      context.req.param("id"),
-      threadmarkAiOwnerUserIdFor(context),
-    );
-    await deleteThreadmarkAiImageFiles(
-      services.attachmentsDirectory ?? config.attachmentsDir,
-      deleted.attachmentPaths,
-    );
-    return context.json({ id: deleted.id, deleted: deleted.deleted });
-  });
-
-  app.post("/api/threadmark-ai/threads/:id/messages", async (context) => {
-    const input = threadmarkAiMessageInputSchema.parse(
-      await context.req.json(),
-    );
-    const threadId = context.req.param("id");
-    const ownerUserId = threadmarkAiOwnerUserIdFor(context);
-    store.getThreadmarkAiThread(threadId, ownerUserId);
-    if (
-      input.clientMessageId &&
-      store.hasInvestigationThreadClientMessage(threadId, input.clientMessageId)
-    ) {
-      return context.json(store.getThreadmarkAiThread(threadId, ownerUserId), 202);
-    }
-
-    const storedImages = input.attachments?.length
-      ? await storeThreadmarkAiImages(
-          services.attachmentsDirectory ?? config.attachmentsDir,
-          input.attachments,
-        )
-      : [];
-    try {
-      const updated = store.addThreadmarkAiMessage(
-        threadId,
-        {
-          body: input.body,
-          clientMessageId: input.clientMessageId,
-          context: input.context,
-        },
-        storedImages,
-        input.allowImageAnalysis === true,
-        investigationMessageActorFor(context),
-      );
-      return context.json(updated, 202);
-    } catch (error) {
-      await cleanupStoredThreadmarkAiImages(storedImages);
-      throw error;
-    }
-  });
-
-  app.post("/api/threadmark-ai/threads/:id/cancel", (context) => {
-    const ownerUserId = threadmarkAiOwnerUserIdFor(context);
-    store.getThreadmarkAiThread(context.req.param("id"), ownerUserId);
-    const cancellation = store.cancelInvestigationThread(
-      context.req.param("id"),
-      actorFor(context),
-    );
-    if (cancellation.cancelledJobId) {
-      services.investigationExecutions?.cancel(cancellation.cancelledJobId);
-    }
-    return context.json(
-      store.getThreadmarkAiThread(context.req.param("id"), ownerUserId),
-    );
-  });
-
-  app.post("/api/threadmark-ai/threads/:id/retry", (context) => {
-    const threadId = context.req.param("id");
-    store.getThreadmarkAiThread(
-      threadId,
-      threadmarkAiOwnerUserIdFor(context),
-    );
-    return context.json(store.retryThreadmarkAiTurn(threadId), 202);
-  });
-
-  app.get("/api/investigation-threads/:id", (context) =>
-    context.json(
-      requireTicketInvestigationThread(store, context.req.param("id")),
-    ),
-  );
-
-  app.post("/api/investigation-threads/:id/messages", async (context) => {
-    const input = investigationThreadMessageInputSchema.parse(
-      await context.req.json(),
-    );
-    requireTicketInvestigationThread(store, context.req.param("id"));
-    return context.json(
-      store.addInvestigationThreadMessage(context.req.param("id"), input),
-      202,
-    );
-  });
-
-  app.post("/api/investigation-threads/:id/cancel", (context) => {
-    requireTicketInvestigationThread(store, context.req.param("id"));
-    const cancellation = store.cancelInvestigationThread(
-      context.req.param("id"),
-      actorFor(context),
-    );
-    if (cancellation.cancelledJobId) {
-      services.investigationExecutions?.cancel(cancellation.cancelledJobId);
-    }
-    return context.json(cancellation.thread);
-  });
-
   app.get("/api/directory", (context) =>
     context.json(directory.getSnapshot()),
   );
@@ -3128,59 +2277,6 @@ function createApiAppInternal(
         actor: actorFor(context, input.actor),
       }),
     );
-  });
-
-  app.get("/api/threadmark-ai/attachments/:id", async (context) => {
-    const ownerUserId = threadmarkAiOwnerUserIdFor(context);
-    const ownerFilter = ownerUserId
-      ? "AND thread.created_by_user_id = ?"
-      : "";
-    const attachment = store.database
-      .prepare(
-        `SELECT attachment.local_path, attachment.mime_type, attachment.file_name
-         FROM investigation_thread_message_attachments attachment
-         JOIN investigation_thread_messages message
-           ON message.id = attachment.message_id
-         JOIN investigation_threads thread ON thread.id = message.thread_id
-         WHERE attachment.id = ?
-           AND thread.scope = 'workspace'
-           ${ownerFilter}`,
-      )
-      .get(
-        context.req.param("id"),
-        ...(ownerUserId ? [ownerUserId] : []),
-      ) as
-      | { local_path: string; mime_type: string; file_name: string }
-      | undefined;
-    if (!attachment) {
-      throw new DomainError("Anexo não encontrado", "not_found", 404);
-    }
-
-    let trustedRoot: string;
-    let filePath: string;
-    try {
-      [trustedRoot, filePath] = await Promise.all([
-        realpath(services.attachmentsDirectory ?? config.attachmentsDir),
-        realpath(attachment.local_path),
-      ]);
-    } catch {
-      throw new DomainError("Arquivo do anexo indisponível", "not_found", 404);
-    }
-    const pathWithinRoot = relative(trustedRoot, filePath);
-    if (pathWithinRoot.startsWith("..") || isAbsolute(pathWithinRoot)) {
-      throw new DomainError("Caminho do anexo inválido", "not_found", 404);
-    }
-
-    const bytes = await readFile(filePath);
-    return new Response(new Uint8Array(bytes), {
-      headers: {
-        "Cache-Control": "private, no-store, max-age=0",
-        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`,
-        "Content-Security-Policy": "sandbox",
-        "Content-Type": attachment.mime_type,
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
   });
 
   app.get("/api/attachments/:id", async (context) => {
@@ -3251,42 +2347,6 @@ function createApiAppInternal(
       return context.json(
         apiError(error.code, error.message, error.details),
         error.statusCode as 400 | 401 | 403 | 404 | 409 | 429 | 503,
-      );
-    }
-    if (error instanceof AiProviderSettingsError) {
-      const status = {
-        invalid: 400,
-        not_found: 404,
-        conflict: 409,
-        unavailable: 503,
-      }[error.kind] as 400 | 404 | 409 | 503;
-      return context.json(
-        apiError(`ai_${error.kind}`, error.message),
-        status,
-      );
-    }
-    if (error instanceof LocalToolSettingsError) {
-      const status = {
-        invalid: 400,
-        not_found: 404,
-        conflict: 409,
-        unavailable: 503,
-      }[error.kind] as 400 | 404 | 409 | 503;
-      return context.json(
-        apiError(`tool_${error.kind}`, error.message),
-        status,
-      );
-    }
-    if (error instanceof InvestigationPackError) {
-      const status = {
-        invalid: 400,
-        not_found: 404,
-        conflict: 409,
-        unavailable: 503,
-      }[error.kind] as 400 | 404 | 409 | 503;
-      return context.json(
-        apiError(`investigation_pack_${error.kind}`, error.message),
-        status,
       );
     }
     if (error instanceof AutomationApiError) {
@@ -3369,34 +2429,6 @@ export function startApiServer(options: StartApiServerOptions = {}): ServerType 
   const notifications =
     options.notifications ??
     new NotificationService(operationalDatabase);
-  const tools =
-    options.tools ??
-    new LocalToolService(
-      operationalDatabase,
-      secretVault,
-    );
-  const legacyTools =
-    options.legacyTools ??
-    new LegacyLocalToolImportService(tools, {
-      codeRoots: config.legacyCodeRoots,
-      vaultDirectory: config.legacyVaultDirectory,
-    });
-  const toolTester = options.toolTester ?? new DeepToolExecutor(tools);
-  const aiSettings =
-    options.aiSettings ??
-    new AiProviderSettingsService(
-      operationalDatabase,
-      secretVault,
-      { codexBin: config.codexBin, attachmentsRoot: config.attachmentsDir },
-    );
-  const investigationPacks =
-    options.investigationPacks ??
-    new InvestigationPackService(
-      operationalDatabase,
-      tools,
-      toolTester,
-      aiSettings,
-    );
   const automationRuntime =
     options.automationRuntime ??
     new AutomationRuntime(operationalDatabase, store, secretVault, {
@@ -3422,11 +2454,6 @@ export function startApiServer(options: StartApiServerOptions = {}): ServerType 
       options.localAccessToken ?? new LocalAccessToken(config.localAccessTokenPath),
     localSettings:
       options.localSettings ?? new LocalSettingsFile(config.localSettingsPath),
-    aiSettings,
-    tools,
-    legacyTools,
-    toolTester,
-    investigationPacks,
     storageUsage:
       options.storageUsage ??
       new LocalStorageUsageService({
@@ -3441,7 +2468,7 @@ export function startApiServer(options: StartApiServerOptions = {}): ServerType 
       new AudioTranscriptionService(operationalDatabase, {
         modelsDirectory: resolve(config.dataDir, "models", "transcription"),
       }),
-    investigationExecutions: options.investigationExecutions,
+
     requestShutdown: options.requestShutdown,
     whatsappQrController: options.whatsappQrController,
     automations: automationApi,

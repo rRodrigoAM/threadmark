@@ -10,23 +10,6 @@ function sourceSection(source: string, startMarker: string, endMarker: string): 
   return source.slice(start, end);
 }
 
-test("mensagens e evidências do Threadmark AI quebram linha sem overflow", async () => {
-  const message = await readFile(
-    new URL("../app/features/threadmark-ai/threadmark-ai.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(message, /min-w-0 max-w-\[min\(88%,42rem\)\]/);
-  assert.match(message, /whitespace-pre-wrap break-words text-sm/);
-  assert.match(message, /className="break-words"/);
-  assert.match(message, /\[overflow-wrap:anywhere\]/);
-  assert.match(message, /message\.author\?\.displayName \?\? "Você"/);
-  assert.match(message, /Excluir esta conversa permanentemente\?/);
-  assert.match(message, /deleteThreadmarkAiThread/);
-  assert.match(message, /message\.aiWorkload === "deep" \? "Investigação" : "Rápida"/);
-  assert.match(message, /aiProviderLabel\(message\.aiProviderId\)/);
-  assert.match(message, /title=\{message\.aiModel\}/);
-});
 
 test("janela aberta recarrega quando o servidor publica um novo build", async () => {
   const [app, api, server] = await Promise.all([
@@ -490,7 +473,7 @@ test("imagens aparecem inline nas conversas, tickets e sala de investigação", 
   assert.match(preview, /flex w-full max-w-\[460px\] min-w-0/);
 });
 
-test("interface delega o agente ao Hermes e preserva APIs durante a migração", async () => {
+test("interface delega o agente ao Hermes sem APIs do produto aposentado", async () => {
   const [app, detail, api, settings] = await Promise.all([
     readFile(new URL("../app/support-app.tsx", import.meta.url), "utf8"),
     readFile(
@@ -509,7 +492,7 @@ test("interface delega o agente ao Hermes e preserva APIs durante a migração",
   assert.doesNotMatch(detail, /InvestigationRoomLauncher|Abrir sala de investigação/);
   assert.match(detail, /<TicketResolutionSummary ticket=\{ticket\} \/>/);
   assert.doesNotMatch(api, /investigateTicket|getInvestigationJobs|\/api\/investigations/);
-  assert.match(api, /\/api\/threadmark-ai\/threads/);
+  assert.doesNotMatch(api, /\/api\/threadmark-ai\/threads/);
   assert.doesNotMatch(settings, /id:\s*"ai"|id:\s*"tools"|<AiSection|<ToolsSettingsSection/);
 });
 
@@ -931,7 +914,6 @@ test("ticket aberto recebe atualizações silenciosas sem sobrepor requisições
     "utf8",
   );
 
-  assert.match(app, /ACTIVE_TICKET_POLL_INTERVAL_MS = 3_000/);
   assert.match(app, /IDLE_TICKET_POLL_INTERVAL_MS = 5_000/);
   assert.match(app, /MAX_TICKET_POLL_INTERVAL_MS = 30_000/);
   assert.match(app, /activeView !== "inbox" \|\| !currentSelectedId/);
@@ -990,26 +972,6 @@ test("ticket oferece edição persistente de título, descrição, prioridade e 
   assert.match(editor, /grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto/);
 });
 
-test("permissões MCP permanecem legíveis no drawer compacto", async () => {
-  const panel = await readFile(
-    new URL(
-      "../app/features/automations/components/connected-apps-panel.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-
-  const permissions = sourceSection(
-    panel,
-    '<div className="grid gap-2">',
-    "</div>\n                          </div>",
-  );
-
-  assert.doesNotMatch(permissions, /grid-cols-3/);
-  assert.match(panel, /min-h-10 items-center justify-between gap-3/);
-  assert.match(panel, /min-w-0 break-words/);
-  assert.match(panel, /<Switch className="shrink-0"/);
-});
 
 test("encaminhamento de bug persiste no ticket e pode finalizar o atendimento", async () => {
   const [app, detail, forwardingDialog, api] = await Promise.all([

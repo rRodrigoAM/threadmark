@@ -6,7 +6,7 @@ import path from "node:path";
 import test, { afterEach } from "node:test";
 
 import { createDatabase, type SupportDatabase } from "../server/db/index.js";
-import { InvestigationExecutionRegistry } from "../server/agent/investigation-execution-registry.js";
+
 import { SupportStore } from "../server/domain/index.js";
 import { createTestApiApp } from "../server/index.js";
 import { loadConfig } from "../server/runtime/config.js";
@@ -417,11 +417,10 @@ test("API associa o contexto do ticket a um cliente existente", async () => {
   const updated = (await response.json()) as {
     client: { id: string };
     affectedStore: { id: string } | null;
-    latestInvestigation: { state: string } | null;
   };
   assert.equal(updated.client.id, target.id);
   assert.equal(updated.affectedStore?.id, targetStore.id);
-  assert.equal(updated.latestInvestigation, null);
+  assert.equal("latestInvestigation" in updated, false);
 });
 
 test("API exclui cliente da operação sem apagar o histórico", async () => {
@@ -470,7 +469,7 @@ test("API exclui ticket permanentemente e responde 404 nas leituras seguintes", 
     localPath: "/tmp/contexto.txt",
     sha256: "api-delete-ticket-attachment-sha",
   });
-  store.queueInvestigation(ticketId);
+
   store.upsertTicketProductForwarding(
     ticketId,
     {
@@ -501,7 +500,7 @@ test("API exclui ticket permanentemente e responde 404 nas leituras seguintes", 
   assert.equal(result.id, ticketId);
   assert.equal(result.actor, "Operador");
   assert.equal(result.reason, "Ticket gerado por engano");
-  assert.equal(result.deleted.investigationJobs, 1);
+  assert.equal("investigationJobs" in result.deleted, false);
   assert.deepEqual(result.preserved, { messages: 1, attachments: 1 });
 
   const [detail, duplicate] = await Promise.all([
@@ -907,139 +906,6 @@ test("API expõe grupos sem expor a fila legada de investigação automática", 
 
   assert.equal(jobsResponse.status, 404);
   assert.equal(invalidState.status, 404);
-});
-
-test("API cria uma sala idempotente e persiste mensagens do operador", async () => {
-  const { app, ticketId } = apiFixture();
-
-  const firstResponse = await app.request(
-    `/api/tickets/${ticketId}/investigation-thread`,
-    { method: "POST" },
-  );
-  assert.equal(firstResponse.status, 200);
-  const first = (await firstResponse.json()) as {
-    id: string;
-    ticketId: string;
-    messages: unknown[];
-  };
-  const duplicateResponse = await app.request(
-    `/api/tickets/${ticketId}/investigation-thread`,
-    { method: "POST" },
-  );
-  const duplicate = (await duplicateResponse.json()) as { id: string };
-  assert.equal(duplicate.id, first.id);
-
-  const messageResponse = await app.request(
-    `/api/investigation-threads/${first.id}/messages`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        body: "Consulte o banco em modo readonly.",
-        clientMessageId: "api-message-idempotency",
-      }),
-    },
-  );
-  assert.equal(messageResponse.status, 202);
-  const queued = (await messageResponse.json()) as {
-    activeTurnState: string | null;
-    messages: Array<{ role: string; body: string }>;
-  };
-  assert.equal(queued.activeTurnState, "queued");
-  assert.equal(queued.messages.length, 1);
-  assert.equal(queued.messages[0]?.role, "operator");
-  assert.equal(
-    queued.messages[0]?.body,
-    "Consulte o banco em modo readonly.",
-  );
-
-  const idempotentResponse = await app.request(
-    `/api/investigation-threads/${first.id}/messages`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        body: "Não deve duplicar.",
-        clientMessageId: "api-message-idempotency",
-      }),
-    },
-  );
-  const idempotent = (await idempotentResponse.json()) as { messages: unknown[] };
-  assert.equal(idempotent.messages.length, 1);
-
-  const getResponse = await app.request(`/api/investigation-threads/${first.id}`);
-  assert.equal(getResponse.status, 200);
-  const persisted = (await getResponse.json()) as { messages: unknown[] };
-  assert.equal(persisted.messages.length, 1);
-  assert.equal(first.ticketId, ticketId);
-
-  const invalid = await app.request(
-    `/api/investigation-threads/${first.id}/messages`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ body: "" }),
-    },
-  );
-  assert.equal(invalid.status, 400);
-});
-
-test("API cancela turno running de forma idempotente e aborta o job específico", async () => {
-  const { store, ticketId } = apiFixture();
-  const registry = new InvestigationExecutionRegistry();
-  const app = createTestApiApp(store, undefined, undefined, {
-    investigationExecutions: registry,
-  });
-  const thread = store.getOrCreateInvestigationThread(ticketId);
-  store.addInvestigationThreadMessage(thread.id, {
-    body: "Investigue até eu clicar em parar.",
-  });
-  const claimed = store.claimNextAgentJob();
-  assert.equal(claimed?.kind, "thread_turn");
-  if (!claimed || claimed.kind !== "thread_turn") assert.fail("turno não reivindicado");
-  const execution = registry.begin(claimed.id);
-
-  const response = await app.request(
-    `/api/investigation-threads/${thread.id}/cancel`,
-    { method: "POST" },
-  );
-  assert.equal(response.status, 200);
-  const cancelled = (await response.json()) as {
-    activeTurnState: string | null;
-    turns: Array<{
-      state: string;
-      cancelledAt: string | null;
-      cancelledBy: string | null;
-    }>;
-  };
-  assert.equal(execution.signal.aborted, true);
-  assert.equal(cancelled.activeTurnState, null);
-  assert.equal(cancelled.turns[0]?.state, "cancelled");
-  assert.ok(cancelled.turns[0]?.cancelledAt);
-  assert.ok(cancelled.turns[0]?.cancelledBy);
-
-  const repeated = await app.request(
-    `/api/investigation-threads/${thread.id}/cancel`,
-    { method: "POST" },
-  );
-  assert.equal(repeated.status, 200);
-  assert.equal(
-    ((await repeated.json()) as { turns: Array<{ state: string }> }).turns[0]
-      ?.state,
-    "cancelled",
-  );
-  assert.equal(
-    (
-      store.database
-        .prepare(
-          `SELECT COUNT(*) AS count FROM ticket_events
-           WHERE ticket_id = ? AND event_type = 'investigation_thread_turn_cancelled'`,
-        )
-        .get(ticketId) as { count: number }
-    ).count,
-    1,
-  );
-  execution.release();
 });
 
 test("API salva nota interna idempotente sem aceitar ator público", async () => {

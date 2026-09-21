@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import QRCode from "qrcode";
-import Database from "better-sqlite3";
+
 
 import type { RuntimeQrResponse } from "../shared/contracts.js";
 import {
@@ -12,12 +11,8 @@ import {
   SetupChallengeService,
 } from "./auth/index.js";
 import { LocalAccessToken } from "./auth/local-access-token.js";
-import { CodexSupportAgent } from "./agent/codex-runner.js";
-import { InvestigationWorker } from "./agent/investigation-worker.js";
-import { ConfiguredSupportAgent } from "./agent/provider-router.js";
-import { AiProviderSettingsService } from "./agent/provider-settings.js";
+
 import { createDatabase } from "./db/index.js";
-import { SupportStore } from "./domain/index.js";
 import { loadConfig } from "./runtime/config.js";
 import {
   createLocalBackup,
@@ -27,7 +22,7 @@ import {
   validateLocalBackup,
 } from "./runtime/backup.js";
 import { hardenPrivateState } from "./runtime/private-state.js";
-import { LocalSecretVault } from "./runtime/secret-vault.js";
+
 import {
   LocalSettingsFile,
   mergeConfiguredIdentities,
@@ -61,8 +56,7 @@ import {
   parseHistoryRescanPreviewArguments,
   previewHistoryRescan,
 } from "./triage/history-rescan.js";
-import { DeepToolExecutor } from "./tools/deep-tool-executor.js";
-import { LocalToolService } from "./tools/local-tool-service.js";
+
 import {
   createHeadlessHttpTransport,
   executeHeadlessCommand,
@@ -109,9 +103,7 @@ async function main(): Promise<void> {
     case "configure":
       await configure();
       return;
-    case "tools":
-      await toolsCommand();
-      return;
+
     case "doctor":
       await doctor();
       return;
@@ -139,9 +131,7 @@ async function main(): Promise<void> {
     case "staff:list":
       await listStaff();
       return;
-    case "agent:once":
-      await runOneInvestigation();
-      return;
+
     case "backup":
       await backup();
       return;
@@ -288,7 +278,7 @@ async function start(): Promise<void> {
         timeoutMs: Math.max(1, deadline - Date.now()),
       });
       console.log(
-        `Serviço local pronto em ${config.apiUrl}. WhatsApp desativado; investigação Codex ${config.agentEnabled ? "ativa" : "desativada"}.`,
+        `Serviço local pronto em ${config.apiUrl}. WhatsApp desativado.`,
       );
       return;
     }
@@ -382,8 +372,6 @@ async function status(): Promise<void> {
         ...state,
         processRunning: Boolean(pid && isProcessRunning(pid)),
         whatsappEnabled: config.whatsappEnabled,
-        agentEnabled: config.agentEnabled,
-        agentExecutor: config.agentExecutor,
         interface: config.webOrigin,
         api: config.apiUrl,
       },
@@ -468,185 +456,9 @@ function configurationSectionLabel(section: ConfigurationSection): string {
   }[section];
 }
 
-async function toolsCommand(): Promise<void> {
-  const action = (process.argv[3] ?? "open").toLowerCase();
-  if (action === "open" || action === "add") {
-    console.log(
-      "As ferramentas do agente são configuradas no Hermes. " +
-        "O Threadmark mantém este comando apenas para consultar ou desativar registros legados.",
-    );
-    return;
-  }
-
-  const config = loadConfig();
-  const token = await new LocalAccessToken(config.localAccessTokenPath).ensure();
-  if (action === "discover" || action === "recover") {
-    const payload = await machineApi<{ items: Array<{
-      id: string;
-      name: string;
-      type: string;
-      rootPath: string;
-      status: "ready" | "already_imported" | "unavailable";
-      statusMessage: string;
-    }> }>(config.apiUrl, token, "/api/tools/legacy-candidates");
-    console.table(
-      payload.items.map((candidate) => ({
-        id: candidate.id,
-        nome: candidate.name,
-        tipo: candidate.type,
-        caminho: candidate.rootPath,
-        estado: candidate.status,
-      })),
-    );
-    if (!payload.items.length) {
-      console.log("Nenhuma configuração antiga de ferramentas foi encontrada.");
-      return;
-    }
-    if (action === "discover") return;
-
-    const readyIds = payload.items
-      .filter((candidate) => candidate.status === "ready")
-      .map((candidate) => candidate.id);
-    if (!readyIds.length) {
-      console.log("Todas as configurações encontradas já foram importadas ou estão indisponíveis.");
-      return;
-    }
-    await confirmLegacyToolRecovery(readyIds.length);
-    const result = await machineApi<{
-      importedCount: number;
-      alreadyImportedCount: number;
-    }>(config.apiUrl, token, "/api/tools/legacy-import", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ candidateIds: readyIds }),
-    });
-    console.log(
-      `${result.importedCount} ferramenta(s) importada(s); ` +
-        `${result.alreadyImportedCount} já estava(m) configurada(s).`,
-    );
-    return;
-  }
-  if (action === "list") {
-    const payload = await machineApi<{ items: Array<{
-      id: string;
-      name: string;
-      type: string;
-      enabled: boolean;
-      lastTestStatus?: string | null;
-    }> }>(config.apiUrl, token, "/api/tools");
-    console.table(
-      payload.items.map((tool) => ({
-        id: tool.id,
-        nome: tool.name,
-        tipo: tool.type,
-        ativa: tool.enabled ? "sim" : "não",
-        último_teste: tool.lastTestStatus ?? "—",
-      })),
-    );
-    if (!payload.items.length) console.log("Nenhuma ferramenta configurada.");
-    return;
-  }
-
-  const toolId = process.argv[4]?.trim();
-  if (!toolId) throw new Error(`Informe o ID: threadmark tools ${action} <id>`);
-  if (action === "test") {
-    const result = await machineApi<{ ok: boolean; message: string }>(
-      config.apiUrl,
-      token,
-      `/api/tools/${encodeURIComponent(toolId)}/test`,
-      { method: "POST" },
-    );
-    console.log(`${result.ok ? "✓" : "!"} ${result.message}`);
-    if (!result.ok) process.exitCode = 1;
-    return;
-  }
-  if (action === "disable") {
-    await machineApi(
-      config.apiUrl,
-      token,
-      `/api/tools/${encodeURIComponent(toolId)}`,
-      {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: false }),
-      },
-    );
-    console.log(`Ferramenta ${toolId} desativada.`);
-    return;
-  }
-  throw new Error(
-    "Use: threadmark tools list|discover|recover [--yes]|test <id>|disable <id>.",
-  );
-}
-
-async function confirmLegacyToolRecovery(count: number): Promise<void> {
-  if (process.argv.includes("--yes")) return;
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("A recuperação exige confirmação interativa ou a opção --yes.");
-  }
-  console.log(`\n${count} configuração(ões) antiga(s) será(ão) autorizada(s) em modo readonly.`);
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await prompt.question("Digite IMPORTAR para continuar: ");
-    if (answer.trim() !== "IMPORTAR") throw new Error("Importação cancelada.");
-  } finally {
-    prompt.close();
-  }
-}
-
-async function machineApi<T = unknown>(
-  apiUrl: string,
-  token: string,
-  route: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("authorization", `Bearer ${token}`);
-  let response: Response;
-  try {
-    response = await fetch(new URL(route, apiUrl), { ...init, headers });
-  } catch {
-    throw new Error("A API local está indisponível. Execute `threadmark on` primeiro.");
-  }
-  const payload = (await response.json().catch(() => null)) as
-    | T
-    | { error?: { message?: string }; message?: string }
-    | null;
-  if (!response.ok) {
-    const objectPayload =
-      payload && typeof payload === "object"
-        ? (payload as { error?: { message?: string }; message?: string })
-        : null;
-    const message = objectPayload?.error?.message ?? objectPayload?.message;
-    throw new Error(message || `A API respondeu HTTP ${response.status}.`);
-  }
-  return payload as T;
-}
-
 async function doctor(): Promise<void> {
   const config = loadConfig();
-  let database: Database.Database | null = null;
-  let aiSettings: AiProviderSettingsService | null = null;
-  if (config.agentExecutor === "internal" && existsSync(config.databasePath)) {
-    try {
-      database = new Database(config.databasePath, {
-        readonly: true,
-        fileMustExist: true,
-      });
-      database.pragma("query_only = ON");
-      aiSettings = new AiProviderSettingsService(
-        database,
-        new LocalSecretVault(path.join(config.dataDir, "secrets")),
-        { codexBin: config.codexBin, attachmentsRoot: config.attachmentsDir },
-      );
-    } catch {
-      database?.close();
-      database = null;
-      aiSettings = null;
-    }
-  }
-  const report = await runDoctor(config, { aiSettings });
-  database?.close();
+  const report = await runDoctor(config);
   if (process.argv.includes("--json")) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -833,42 +645,6 @@ async function listStaff(): Promise<void> {
     : [...new Set([...config.staffIdentities, ...settings.staffIdentities])];
   console.table(combined.map((identity) => ({ identidade: identity })));
   if (!combined.length) console.log("Nenhum funcionário adicional configurado; mensagens fromMe continuam sendo tratadas como staff.");
-}
-
-async function runOneInvestigation(): Promise<void> {
-  const config = loadConfig();
-  const database = createDatabase(config.databasePath);
-  const store = new SupportStore(database);
-  const secretVault = new LocalSecretVault(path.join(config.dataDir, "secrets"));
-  const codexAgent = new CodexSupportAgent({
-    codexBin: config.codexBin,
-    cwd: config.projectRoot,
-    dataDir: path.join(config.dataDir, "agent-runs"),
-    attachmentsRoot: config.attachmentsDir,
-    mcpToolLoopEnabled: config.codexMcpToolLoopEnabled,
-    databasePath: config.databasePath,
-    supportDataDir: config.dataDir,
-  });
-  const agent = new ConfiguredSupportAgent(
-    database,
-    new AiProviderSettingsService(
-      database,
-      secretVault,
-      { codexBin: config.codexBin, attachmentsRoot: config.attachmentsDir },
-    ),
-    codexAgent,
-    new DeepToolExecutor(new LocalToolService(database, secretVault), {
-      database,
-    }),
-  );
-  try {
-    const processed = await new InvestigationWorker(store, agent, {
-      recoverOrphanedJobs: false,
-    }).runOne();
-    console.log(processed ? "Uma investigação foi concluída." : "Não há investigação pendente.");
-  } finally {
-    database.close();
-  }
 }
 
 async function backup(): Promise<void> {
@@ -1094,9 +870,7 @@ Operação:
 
 Configuração:
   configure [seção]           Abre o assistente (general, whatsapp, team, data)
-  tools list                  Lista ferramentas legadas do Threadmark
-  tools discover|recover      Revisa e recupera configurações antigas
-  tools test|disable <id>     Testa ou desativa uma ferramenta legada
+
   service install             Inicia no login e recupera falhas no macOS
   service uninstall           Remove o serviço, preservando os dados
   service status              Mostra o estado do LaunchAgent
@@ -1122,7 +896,7 @@ Dados e suporte:
   staff:add <identidade...>   Adiciona integrantes da equipe
   staff:remove <identidade...> Remove integrantes da equipe
   staff:list                  Lista a equipe configurada
-  agent:once                  Executa uma investigação pendente
+
   security:harden             Reaplica permissões privadas
   setup-token                 Emite o código de configuração inicial
 

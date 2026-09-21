@@ -8,19 +8,35 @@ test("config mantem servico restrito ao localhost por padrao", () => {
   assert.equal(config.apiHost, "127.0.0.1");
   assert.equal(config.apiPort, 4317);
   assert.equal(config.apiUrl, "http://127.0.0.1:4317");
+  assert.equal(config.publicOrigin, "http://127.0.0.1:3000");
   assert.match(config.databasePath, /\.data\/threadmark\.sqlite$/);
   assert.deepEqual(config.monitoredGroupJids, []);
   assert.deepEqual(config.staffIdentities, []);
   assert.equal(config.triageAiEnabled, true);
   assert.equal(config.triageAiModel, "gpt-5.4-mini");
   assert.equal(config.triageAiQuietMs, 180_000);
-  assert.equal(config.agentExecutor, "internal");
+  assert.equal("agentExecutor" in config, false);
 });
 
-test("config permite delegar a execução de IA ao Hermes sem mudar o padrão", () => {
-  const config = loadConfig({ SUPPORT_AGENT_EXECUTOR: "hermes" });
+test("config separa origem pública HTTPS da origem interna da Web", () => {
+  const config = loadConfig({
+    SUPPORT_WEB_ORIGIN: "http://127.0.0.1:3000",
+    SUPPORT_PUBLIC_ORIGIN: "https://threadmark.example.com",
+  });
 
-  assert.equal(config.agentExecutor, "hermes");
+  assert.equal(config.webOrigin, "http://127.0.0.1:3000");
+  assert.equal(config.publicOrigin, "https://threadmark.example.com");
+  assert.equal(
+    loadConfig({ SUPPORT_PUBLIC_ORIGIN: "" }).publicOrigin,
+    "http://127.0.0.1:3000",
+  );
+});
+
+test("config ignora seleção do executor interno aposentado", () => {
+  const config = loadConfig({ SUPPORT_AGENT_EXECUTOR: "internal", CODEX_BIN: "should-not-run" });
+
+  assert.equal("agentExecutor" in config, false);
+  assert.equal("codexBin" in config, false);
 });
 
 test("config normaliza grupos e equipe sem duplicatas", () => {
@@ -60,12 +76,12 @@ test("config por ambiente rejeita janela menor que os 30 segundos do SQLite", ()
   );
 });
 
-test("config preserva fontes legadas somente para revisão de ferramentas", () => {
+test("config ignora raízes legadas de ferramentas aposentadas", () => {
   const config = loadConfig({
     SUPPORT_CODE_ROOTS: "/produto/a, /produto/b,/produto/a",
     SUPPORT_VAULT_DIR: "/conhecimento",
   });
 
-  assert.deepEqual(config.legacyCodeRoots, ["/produto/a", "/produto/b"]);
-  assert.equal(config.legacyVaultDirectory, "/conhecimento");
+  assert.equal("legacyCodeRoots" in config, false);
+  assert.equal("legacyVaultDirectory" in config, false);
 });

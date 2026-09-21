@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 
 import type { TriageAnalysis } from "../server/agent/types.js";
-import { InvestigationWorker } from "../server/agent/investigation-worker.js";
 import {
   createDatabase,
   type SupportDatabase,
@@ -33,7 +32,7 @@ function fixture(): Fixture {
   const store = new SupportStore(database);
   const account = store.upsertAccount({
     id: "triage-ai-account",
-    phoneNumber: "+5547999999999",
+    phoneNumber: "+554****9999",
     displayName: "Acme Comercial",
   });
   const client = store.upsertClient({
@@ -59,7 +58,7 @@ function fixture(): Fixture {
   const customer = store.upsertParticipant({
     id: "triage-ai-customer",
     externalJid: "5547888888888@s.whatsapp.net",
-    phoneE164: "+5547888888888",
+    phoneE164: "+554****8888",
     displayName: "Cliente",
   });
   store.addGroupParticipant(group.id, customer.id);
@@ -244,7 +243,7 @@ function completeTwoGroupJob(current: Fixture) {
     "Outra coisa: a campanha não enviou nenhuma mensagem.",
   );
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed);
   assert.equal(claimed.kind, "triage");
   if (claimed.kind !== "triage") assert.fail("Job de triagem não foi reivindicado");
@@ -469,7 +468,7 @@ test("triagem aguarda a transcrição do áudio antes de montar o contexto", () 
   })();
 
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed?.kind === "triage");
   if (!claimed || claimed.kind !== "triage") assert.fail("Job não encontrado");
   const input = current.store.getTriageAiJobInput(claimed.id);
@@ -584,7 +583,7 @@ test("IA vincula automaticamente ao ticket apenas com contexto interno e alta co
   );
 
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed?.kind === "triage");
   if (!claimed || claimed.kind !== "triage") assert.fail("Job não encontrado");
   const input = current.store.getTriageAiJobInput(claimed.id);
@@ -668,7 +667,7 @@ test("executor externo mantém vínculo de alta confiança como sugestão para r
   );
 
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed?.kind === "triage");
   if (!claimed || claimed.kind !== "triage") assert.fail("Job não encontrado");
 
@@ -744,7 +743,7 @@ test("mudança explícita de assunto impede vínculo automático e mantém respo
   );
 
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed?.kind === "triage");
   if (!claimed || claimed.kind !== "triage") assert.fail("Job não encontrado");
 
@@ -877,100 +876,6 @@ test("restaurar mensagens libera uma nova geração de triagem por IA", () => {
   );
 });
 
-test("worker usa fallback local depois de duas falhas da triagem Codex", async () => {
-  const current = fixture();
-  addMessage(
-    current,
-    "fallback-demand",
-    "2026-07-17T18:00:00.000Z",
-    "Os pedidos sumiram do dashboard, conseguem verificar?",
-  );
-  assert.equal(scheduler(current, "triage-fallback-model"), 1);
-  let attempts = 0;
-  const events: string[] = [];
-  const worker = new InvestigationWorker(
-    current.store,
-    {
-      async analyse() {
-        throw new Error("investigação de ticket não esperada");
-      },
-      async investigateThread() {
-        throw new Error("turno profundo não esperado");
-      },
-      async triage() {
-        attempts += 1;
-        throw new Error(`falha semântica ${attempts}`);
-      },
-    },
-    {
-      recoverOrphanedJobs: false,
-      onEvent: (event) =>
-        events.push(
-          event.type === "idle" ? event.type : `${event.type}:${event.jobKind}`,
-        ),
-    },
-  );
-
-  assert.equal(await worker.runOne(), true);
-  assert.deepEqual(
-    current.database
-      .prepare(
-        `SELECT state, attempt_count, fallback_used
-         FROM triage_ai_jobs`,
-      )
-      .get(),
-    { state: "queued", attempt_count: 1, fallback_used: 0 },
-  );
-  assert.equal(await worker.runOne(), true);
-
-  assert.equal(attempts, 2);
-  assert.deepEqual(events, [
-    "started:triage",
-    "requeued:triage",
-    "started:triage",
-    "completed:triage",
-  ]);
-  assert.deepEqual(
-    current.database
-      .prepare(
-        `SELECT state, attempt_count, fallback_used, error
-         FROM triage_ai_jobs`,
-      )
-      .get(),
-    {
-      state: "completed",
-      attempt_count: 2,
-      fallback_used: 1,
-      error: "falha semântica 2",
-    },
-  );
-  assert.equal(
-    current.store.listConversationTriageBlocks(current.groupId).items.length,
-    0,
-  );
-  assert.deepEqual(
-    current.database
-      .prepare(
-        `SELECT confidence, ai_model, ai_prompt_version, ai_fallback_used,
-                proposed_categories_json
-         FROM triage_blocks`,
-      )
-      .get(),
-    {
-      confidence: 0.72,
-      ai_model: "triage-fallback-model",
-      ai_prompt_version: TRIAGE_PROMPT_VERSION,
-      ai_fallback_used: 1,
-      proposed_categories_json: JSON.stringify({
-        contactReason: [],
-        productArea: [],
-        platform: [],
-        symptom: [],
-      }),
-    },
-  );
-});
-
 test("janela persistida de três minutos espera a conversa e ignora mensagens da equipe", () => {
   const current = fixture();
   current.store.updateTriageAiSettings({
@@ -989,7 +894,7 @@ test("janela persistida de três minutos espera a conversa e ignora mensagens da
   const staff = current.store.upsertParticipant({
     id: "triage-silence-staff",
     externalJid: "5500000000001@s.whatsapp.net",
-    phoneE164: "+5500000000001",
+    phoneE164: "+550****0001",
     displayName: "Operador",
   });
   current.store.setStaffMember(staff.id, "Operador");
@@ -1079,7 +984,7 @@ test("nova resposta da equipe reagenda job para incluir o contexto interno", () 
   );
 
   assert.equal(scheduler(current), 1);
-  const refreshed = current.store.claimNextAgentJob();
+  const refreshed = current.store.claimNextTriageAiJob();
   assert.ok(refreshed?.kind === "triage");
   if (!refreshed || refreshed.kind !== "triage") {
     assert.fail("Job reagendado não encontrado");
@@ -1101,7 +1006,7 @@ test("IA pode aguardar contexto sem criar card nem repetir até haver novidade",
     "Conseguem olhar isso?",
   );
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed?.kind === "triage");
   if (!claimed || claimed.kind !== "triage") assert.fail("Job não encontrado");
 
@@ -1160,7 +1065,7 @@ test("nova mensagem externa libera uma espera por contexto e reinicia o silênci
     "Conseguem olhar isso?",
   );
   assert.equal(scheduler(current), 1);
-  const claimed = current.store.claimNextAgentJob();
+  const claimed = current.store.claimNextTriageAiJob();
   assert.ok(claimed?.kind === "triage");
   if (!claimed || claimed.kind !== "triage") assert.fail("Job não encontrado");
 
@@ -1217,7 +1122,7 @@ test("nova mensagem externa libera uma espera por contexto e reinicia o silênci
   );
 
   assert.equal(scheduler(current), 1);
-  const retriedOldJob = current.store.claimNextAgentJob();
+  const retriedOldJob = current.store.claimNextTriageAiJob();
   assert.ok(retriedOldJob?.kind === "triage");
   if (!retriedOldJob || retriedOldJob.kind !== "triage") {
     assert.fail("Job antigo não encontrado");
@@ -1244,7 +1149,7 @@ test("nova mensagem externa libera uma espera por contexto e reinicia o silênci
   });
 
   assert.equal(scheduler(current), 1);
-  const newContextJob = current.store.claimNextAgentJob();
+  const newContextJob = current.store.claimNextTriageAiJob();
   assert.ok(newContextJob?.kind === "triage");
   if (!newContextJob || newContextJob.kind !== "triage") {
     assert.fail("Job do novo contexto não encontrado");
@@ -1384,7 +1289,7 @@ test("continuação semântica atualiza o mesmo card sugerido", () => {
     "Os pedidos não aparecem no dashboard.",
   );
   assert.equal(scheduler(current), 1);
-  const firstJob = current.store.claimNextAgentJob();
+  const firstJob = current.store.claimNextTriageAiJob();
   assert.ok(firstJob?.kind === "triage");
   if (!firstJob || firstJob.kind !== "triage") assert.fail("Job não encontrado");
   current.store.completeTriageAiJob(firstJob.id, {
@@ -1417,7 +1322,7 @@ test("continuação semântica atualiza o mesmo card sugerido", () => {
     "A loja afetada é a Loja Exemplo Ômega.",
   );
   assert.equal(scheduler(current), 1);
-  const secondJob = current.store.claimNextAgentJob();
+  const secondJob = current.store.claimNextTriageAiJob();
   assert.ok(secondJob?.kind === "triage");
   if (!secondJob || secondJob.kind !== "triage") assert.fail("Job não encontrado");
   const secondInput = current.store.getTriageAiJobInput(secondJob.id);
@@ -1488,72 +1393,4 @@ test("scheduler mantém somente um job ativo por conversa com backlog grande", (
   assert.equal(current.store.listTriageCandidates(500).length, 1);
   assert.equal(aiScheduler.scheduleBatch("serialized-model"), 0);
   assert.equal(rowCount(current.database, "triage_ai_jobs"), 1);
-});
-
-test("job obsoleto não é reenfileirado quando chega novo contexto durante a IA", async () => {
-  const current = fixture();
-  addMessage(
-    current,
-    "stale-running-first",
-    new Date(Date.now() - 5 * 60_000).toISOString(),
-    "Os pedidos não aparecem no dashboard.",
-  );
-  assert.equal(scheduler(current, "stale-running-model"), 1);
-  let attempts = 0;
-  const events: string[] = [];
-  const worker = new InvestigationWorker(
-    current.store,
-    {
-      async analyse() {
-        throw new Error("investigação de ticket não esperada");
-      },
-      async investigateThread() {
-        throw new Error("turno profundo não esperado");
-      },
-      async triage() {
-        attempts += 1;
-        addMessage(
-          current,
-          "stale-running-second",
-          new Date().toISOString(),
-          "A loja afetada é a Loja Exemplo Ômega.",
-        );
-        throw new Error("execução antiga falhou depois da nova mensagem");
-      },
-    },
-    {
-      recoverOrphanedJobs: false,
-      onEvent: (event) => {
-        if (event.type !== "idle") events.push(`${event.type}:${event.jobKind}`);
-      },
-    },
-  );
-
-  assert.equal(await worker.runOne(), true);
-  assert.equal(attempts, 1);
-  assert.deepEqual(events, ["started:triage", "failed:triage"]);
-  assert.deepEqual(
-    current.database
-      .prepare("SELECT state, attempt_count FROM triage_ai_jobs")
-      .get(),
-    { state: "failed", attempt_count: 1 },
-  );
-  assert.equal(
-    (
-      current.database
-        .prepare(
-          "SELECT COUNT(*) AS count FROM triage_ai_job_messages WHERE active = 1",
-        )
-        .get() as { count: number }
-    ).count,
-    0,
-  );
-
-  const forced = current.store.triggerConversationTriageAnalysis(
-    current.groupId,
-    { promptVersion: TRIAGE_PROMPT_VERSION },
-  );
-  assert.equal(forced.accepted, true);
-  assert.ok(forced.jobId);
-  assert.equal(rowCount(current.database, "triage_ai_jobs"), 2);
 });

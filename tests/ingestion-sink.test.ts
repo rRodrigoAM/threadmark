@@ -1996,7 +1996,7 @@ test("reentrega de mensagem self desvinculada não a anexa novamente ao ticket",
   }
 });
 
-test("histórico da equipe invalida minuta antiga sem enfileirar análise automática", async () => {
+test("histórico da equipe supersede sugestão atual sem criar investigação", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "support-staff-history-"));
   const database = createDatabase(":memory:");
   const store = new SupportStore(database);
@@ -2075,14 +2075,6 @@ test("histórico da equipe invalida minuta antiga sem enfileirar análise autom�
       confidence: 0.9,
       createdAt: "2026-07-16T12:10:00.000Z",
     });
-    const originalQueueInvestigation = store.queueInvestigation.bind(store);
-    let queueCalls = 0;
-    store.queueInvestigation = (
-      ...args: Parameters<SupportStore["queueInvestigation"]>
-    ) => {
-      queueCalls += 1;
-      return originalQueueInvestigation(...args);
-    };
 
     await sink.upsertMessages([
       historicalStaffEnvelope(
@@ -2092,7 +2084,6 @@ test("histórico da equipe invalida minuta antiga sem enfileirar análise autom�
       ),
     ]);
 
-    assert.equal(queueCalls, 0);
     assert.equal(
       store.getTicketDetail(ticket.id).suggestions.find(
         (suggestion) => suggestion.id === "staff-history-current-candidate",
@@ -2117,23 +2108,21 @@ test("histórico da equipe invalida minuta antiga sem enfileirar análise autom�
     await sink.upsertMessages(invalidatingBatch);
 
     const detail = store.getTicketDetail(ticket.id);
-    assert.equal(queueCalls, 0);
     assert.equal(
       detail.suggestions.find(
         (suggestion) => suggestion.id === "staff-history-current-candidate",
       )?.status,
       "superseded",
     );
-    assert.equal(detail.sentResponses.length, 3);
     assert.equal(
-      (database
-        .prepare(
-          `SELECT COUNT(*) AS count FROM investigation_jobs
-           WHERE ticket_id = ? AND state = 'queued'`,
-        )
-        .get(ticket.id) as { count: number }).count,
+      (
+        database
+          .prepare("SELECT COUNT(*) AS count FROM investigation_jobs WHERE ticket_id = ?")
+          .get(ticket.id) as { count: number }
+      ).count,
       0,
     );
+    assert.equal(detail.sentResponses.length, 3);
   } finally {
     database.close();
     await rm(temporary, { recursive: true, force: true });

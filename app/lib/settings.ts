@@ -2,29 +2,11 @@ import type { RuntimeState } from "./types";
 import { API_URL, ApiError } from "./api";
 import { notifySessionExpired } from "./session-events";
 import {
-  LOCAL_TOOL_OPERATIONS,
-  LOCAL_TOOL_TYPES,
-  type LocalToolConfigMap,
-  type LocalToolDto,
-  type LocalToolOperation,
-  type LocalToolTestResult,
-  type LocalToolType,
-  type LocalToolWriteInput,
-  type InvestigationPackDto,
-  type InvestigationPackListResponse,
-  type InvestigationPackOnboardingInput,
   type AudioTranscriptionSettingsDto,
   type LocalTranscriptionModelDto,
 } from "../../shared/contracts";
 
 export type {
-  LocalToolDto,
-  LocalToolOperation,
-  LocalToolTestResult,
-  LocalToolType,
-  LocalToolWriteInput,
-  InvestigationPackDto,
-  InvestigationPackOnboardingInput,
   AudioTranscriptionSettingsDto,
   LocalTranscriptionModelDto,
 };
@@ -75,73 +57,6 @@ export interface StaffSettings {
   identities: string[];
   participants: StaffParticipant[];
   restartRequired: boolean;
-}
-
-export type AiProviderId =
-  | "codex"
-  | "openai"
-  | "anthropic"
-  | "openrouter"
-  | "ollama";
-
-export interface AiConnectionCapabilities {
-  structuredOutput: boolean;
-  vision: boolean;
-  triage: boolean;
-  automaticAnalysis: boolean;
-  localTools: boolean;
-  codebaseAccess: boolean;
-  deepInvestigation: boolean;
-}
-
-export interface AiConnection {
-  id: string;
-  label: string;
-  providerId: AiProviderId;
-  baseUrl: string | null;
-  enabled: boolean;
-  hasSecret: boolean;
-  secretLastFour: string | null;
-  capabilities: AiConnectionCapabilities;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface WriteAiConnectionInput {
-  label: string;
-  providerId: AiProviderId;
-  baseUrl?: string | null;
-  enabled?: boolean;
-  /** Write-only. An empty value must be omitted so an existing secret is preserved. */
-  apiKey?: string;
-}
-
-export interface AiConnectionTestResult {
-  ok: boolean;
-  message: string;
-  models?: string[];
-}
-
-export type AiTaskKind =
-  | "triage"
-  | "automatic"
-  | "quick"
-  | "deep"
-  | "documentation";
-
-export interface AiTaskProfile {
-  taskKind: AiTaskKind;
-  connectionId: string | null;
-  model: string;
-  enabled: boolean;
-  updatedAt: string;
-}
-
-export interface WriteAiTaskProfile {
-  taskKind: AiTaskKind;
-  connectionId: string | null;
-  model: string;
-  enabled: boolean;
 }
 
 export interface WhatsappQrState {
@@ -262,41 +177,6 @@ function roleValue(value: unknown): SettingsRole {
     : "viewer";
 }
 
-function providerValue(value: unknown): AiProviderId {
-  if (value === "codex_cli") return "codex";
-  return value === "codex" ||
-    value === "openai" ||
-    value === "anthropic" ||
-    value === "openrouter" ||
-    value === "ollama"
-    ? value
-    : "codex";
-}
-
-function taskKindValue(value: unknown): AiTaskKind {
-  return value === "triage" ||
-    value === "automatic" ||
-    value === "quick" ||
-    value === "deep" ||
-    value === "documentation"
-    ? value
-    : "automatic";
-}
-
-function localToolTypeValue(value: unknown): LocalToolType {
-  return LOCAL_TOOL_TYPES.includes(value as LocalToolType)
-    ? (value as LocalToolType)
-    : "codebase";
-}
-
-function localToolOperationValues(value: unknown): LocalToolOperation[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (item): item is LocalToolOperation =>
-      LOCAL_TOOL_OPERATIONS.includes(item as LocalToolOperation),
-  );
-}
-
 function normalizeWorkspace(value: unknown): WorkspaceSettings {
   const object = asObject(value);
   return {
@@ -329,48 +209,6 @@ function normalizeParticipant(value: unknown): StaffParticipant {
     phoneE164: nullableString(object.phoneE164),
     externalJid: stringValue(object.externalJid),
     active: booleanValue(object.active, true),
-  };
-}
-
-function normalizeConnection(value: unknown): AiConnection {
-  const object = asObject(value);
-  const capabilitySource = asObject(object.capabilities ?? {});
-  const providerId = providerValue(object.providerId ?? object.provider);
-  const localTools = booleanValue(capabilitySource.localTools);
-  const codebaseAccess = booleanValue(
-    capabilitySource.codebaseAccess,
-    localTools,
-  );
-  return {
-    id: stringValue(object.id),
-    label: stringValue(object.label),
-    providerId,
-    baseUrl: nullableString(object.baseUrl),
-    enabled: booleanValue(object.enabled, true),
-    hasSecret: booleanValue(object.hasSecret),
-    secretLastFour: nullableString(object.secretLastFour),
-    capabilities: {
-      structuredOutput: booleanValue(capabilitySource.structuredOutput, true),
-      vision: booleanValue(capabilitySource.vision),
-      triage: booleanValue(capabilitySource.triage),
-      automaticAnalysis: booleanValue(capabilitySource.automaticAnalysis),
-      localTools,
-      codebaseAccess,
-      deepInvestigation: booleanValue(capabilitySource.deepInvestigation),
-    },
-    createdAt: stringValue(object.createdAt),
-    updatedAt: stringValue(object.updatedAt),
-  };
-}
-
-function normalizeTaskProfile(value: unknown): AiTaskProfile {
-  const object = asObject(value);
-  return {
-    taskKind: taskKindValue(object.taskKind),
-    connectionId: nullableString(object.connectionId),
-    model: stringValue(object.model),
-    enabled: booleanValue(object.enabled, true),
-    updatedAt: stringValue(object.updatedAt),
   };
 }
 
@@ -433,32 +271,6 @@ function normalizeAudioTranscriptionSettings(
         installedAt: nullableString(model.installedAt),
       };
     }),
-  };
-}
-
-function normalizeLocalTool(value: unknown): LocalToolDto {
-  const object = asObject(value);
-  const type = localToolTypeValue(object.type);
-  return {
-    id: stringValue(object.id),
-    type,
-    name: stringValue(object.name),
-    description: nullableString(object.description),
-    enabled: booleanValue(object.enabled, true),
-    deepEnabled: booleanValue(object.deepEnabled, true),
-    allowedOperations: localToolOperationValues(object.allowedOperations),
-    config: asObject(object.config ?? {}) as unknown as LocalToolConfigMap[LocalToolType],
-    secretFields: Array.isArray(object.secretFields)
-      ? object.secretFields.filter((item): item is string => typeof item === "string")
-      : [],
-    lastTestedAt: nullableString(object.lastTestedAt),
-    lastTestStatus:
-      object.lastTestStatus === "success" || object.lastTestStatus === "failed"
-        ? object.lastTestStatus
-        : null,
-    lastTestMessage: nullableString(object.lastTestMessage),
-    createdAt: stringValue(object.createdAt),
-    updatedAt: stringValue(object.updatedAt),
   };
 }
 
@@ -607,80 +419,6 @@ export async function renewWhatsappQr(): Promise<void> {
   });
 }
 
-export async function getAiConnections(): Promise<AiConnection[]> {
-  const payload = asObject(
-    await settingsRequest<unknown>("/api/ai/connections"),
-  );
-  return Array.isArray(payload.items)
-    ? payload.items.map(normalizeConnection)
-    : [];
-}
-
-export async function createAiConnection(
-  input: WriteAiConnectionInput,
-): Promise<AiConnection> {
-  return normalizeConnection(
-    await settingsRequest<unknown>("/api/ai/connections", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  );
-}
-
-export async function updateAiConnection(
-  connectionId: string,
-  input: Partial<WriteAiConnectionInput>,
-): Promise<AiConnection> {
-  return normalizeConnection(
-    await settingsRequest<unknown>(
-      `/api/ai/connections/${encodeURIComponent(connectionId)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(input),
-      },
-    ),
-  );
-}
-
-export async function deleteAiConnection(connectionId: string): Promise<void> {
-  await settingsRequest<{ ok: true }>(
-    `/api/ai/connections/${encodeURIComponent(connectionId)}`,
-    { method: "DELETE" },
-  );
-}
-
-export function testAiConnection(
-  connectionId: string,
-): Promise<AiConnectionTestResult> {
-  return settingsRequest<AiConnectionTestResult>(
-    `/api/ai/connections/${encodeURIComponent(connectionId)}/test`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
-}
-
-export async function getAiTaskProfiles(): Promise<AiTaskProfile[]> {
-  const payload = asObject(
-    await settingsRequest<unknown>("/api/ai/task-profiles"),
-  );
-  return Array.isArray(payload.items)
-    ? payload.items.map(normalizeTaskProfile)
-    : [];
-}
-
-export async function updateAiTaskProfiles(
-  items: WriteAiTaskProfile[],
-): Promise<AiTaskProfile[]> {
-  const payload = asObject(
-    await settingsRequest<unknown>("/api/ai/task-profiles", {
-      method: "PUT",
-      body: JSON.stringify({ items }),
-    }),
-  );
-  return Array.isArray(payload.items)
-    ? payload.items.map(normalizeTaskProfile)
-    : [];
-}
-
 export async function getAudioTranscriptionSettings(): Promise<AudioTranscriptionSettingsDto> {
   return normalizeAudioTranscriptionSettings(
     await settingsRequest<unknown>("/api/ai/audio-transcription"),
@@ -745,78 +483,6 @@ export async function queueAudioTranscription(
 ): Promise<void> {
   await settingsRequest<{ queued: true }>(
     `/api/attachments/${encodeURIComponent(attachmentId)}/transcription`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
-}
-
-export async function getLocalTools(): Promise<LocalToolDto[]> {
-  const payload = asObject(await settingsRequest<unknown>("/api/tools"));
-  return Array.isArray(payload.items) ? payload.items.map(normalizeLocalTool) : [];
-}
-
-export async function createLocalTool(
-  input: LocalToolWriteInput,
-): Promise<LocalToolDto> {
-  return normalizeLocalTool(
-    await settingsRequest<unknown>("/api/tools", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  );
-}
-
-export async function updateLocalTool(
-  toolId: string,
-  input: Partial<LocalToolWriteInput>,
-): Promise<LocalToolDto> {
-  return normalizeLocalTool(
-    await settingsRequest<unknown>(`/api/tools/${encodeURIComponent(toolId)}`, {
-      method: "PATCH",
-      body: JSON.stringify(input),
-    }),
-  );
-}
-
-export async function deleteLocalTool(toolId: string): Promise<void> {
-  await settingsRequest<{ ok: true }>(`/api/tools/${encodeURIComponent(toolId)}`, {
-    method: "DELETE",
-  });
-}
-
-export function testLocalTool(toolId: string): Promise<LocalToolTestResult> {
-  return settingsRequest<LocalToolTestResult>(
-    `/api/tools/${encodeURIComponent(toolId)}/test`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
-}
-
-export function getInvestigationPacks(): Promise<InvestigationPackListResponse> {
-  return settingsRequest<InvestigationPackListResponse>("/api/investigation-packs");
-}
-
-export function createInvestigationPack(
-  input: InvestigationPackOnboardingInput,
-): Promise<InvestigationPackDto> {
-  return settingsRequest<InvestigationPackDto>("/api/investigation-packs/onboarding", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export function probeInvestigationPack(
-  packId: string,
-): Promise<InvestigationPackDto> {
-  return settingsRequest<InvestigationPackDto>(
-    `/api/investigation-packs/${encodeURIComponent(packId)}/probe`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
-}
-
-export function activateInvestigationPack(
-  packId: string,
-): Promise<InvestigationPackDto> {
-  return settingsRequest<InvestigationPackDto>(
-    `/api/investigation-packs/${encodeURIComponent(packId)}/activate`,
     { method: "POST", body: JSON.stringify({}) },
   );
 }

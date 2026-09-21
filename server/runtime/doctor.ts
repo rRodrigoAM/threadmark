@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
+
 import { existsSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import Database from "better-sqlite3";
 
-import type { AiProviderSettingsService } from "../agent/provider-settings.js";
+
 import type { SupportConfig } from "./config.js";
 import { RuntimeStateFile, type RuntimeState } from "./runtime-state.js";
 import { verifyWebBuild } from "./web-readiness.js";
@@ -11,7 +11,7 @@ import { verifyWebBuild } from "./web-readiness.js";
 export type DoctorProbeState = "ok" | "warning" | "failed" | "skipped";
 
 export interface DoctorProbe {
-  id: "process" | "api" | "web" | "sqlite" | "whatsapp" | "agent" | "disk";
+  id: "process" | "api" | "web" | "sqlite" | "whatsapp" | "disk";
   label: string;
   state: DoctorProbeState;
   message: string;
@@ -29,11 +29,7 @@ export interface DoctorOptions {
   fetcher?: typeof fetch;
   runtimeState?: RuntimeState;
   processRunning?: (pid: number) => boolean;
-  commandProbe?: (command: string, argumentsList: string[]) => Promise<string>;
-  aiSettings?: Pick<
-    AiProviderSettingsService,
-    "getProfiles" | "listConnections" | "testConnection"
-  > | null;
+
 }
 
 export async function runDoctor(
@@ -56,13 +52,6 @@ export async function runDoctor(
   );
   probes.push(probeSqlite(config.databasePath));
   probes.push(probeWhatsapp(config, runtime));
-  probes.push(
-    await probeAgent(
-      config,
-      options.commandProbe ?? ((command, argumentsList) => probeCommand(command, argumentsList)),
-      options.aiSettings,
-    ),
-  );
   probes.push(await probeDisk(config.dataDir, config.projectRoot));
 
   const failures = probes.filter((probe) => probe.state === "failed").length;
@@ -155,100 +144,6 @@ function probeWhatsapp(config: SupportConfig, runtime: RuntimeState): DoctorProb
   return warning("whatsapp", "WhatsApp", detail);
 }
 
-async function probeAgent(
-  config: SupportConfig,
-  commandProbe: (command: string, argumentsList: string[]) => Promise<string>,
-  settings?: Pick<
-    AiProviderSettingsService,
-    "getProfiles" | "listConnections" | "testConnection"
-  > | null,
-): Promise<DoctorProbe> {
-  if (!config.agentEnabled) {
-    return skipped("agent", "Agente de IA", "Worker de IA desativado por configuração.");
-  }
-  if (config.agentExecutor === "hermes") {
-    return skipped(
-      "agent",
-      "Executor externo",
-      "Triagem delegada ao Hermes; modelos e ferramentas são verificados no ambiente do agente.",
-    );
-  }
-  if (settings === null) {
-    return failed(
-      "agent",
-      "Agente de IA",
-      "Não foi possível ler os perfis de IA porque o banco local está indisponível.",
-    );
-  }
-  if (settings) {
-    try {
-      const activeProfiles = settings
-        .getProfiles()
-        .filter((profile) => profile.enabled);
-      if (!activeProfiles.length) {
-        return skipped(
-          "agent",
-          "Agente de IA",
-          "Nenhum perfil de IA está ativo.",
-        );
-      }
-      const missingConnection = activeProfiles.find((profile) => !profile.connectionId);
-      if (missingConnection) {
-        return failed(
-          "agent",
-          "Agente de IA",
-          `O perfil ${missingConnection.taskKind} está ativo sem uma conexão selecionada.`,
-        );
-      }
-
-      const connections = new Map(
-        settings.listConnections().map((connection) => [connection.id, connection]),
-      );
-      const connectionIds = [
-        ...new Set(
-          activeProfiles.flatMap((profile) =>
-            profile.connectionId ? [profile.connectionId] : [],
-          ),
-        ),
-      ];
-      const validated: string[] = [];
-      for (const connectionId of connectionIds) {
-        const connection = connections.get(connectionId);
-        if (!connection || !connection.enabled) {
-          return failed(
-            "agent",
-            "Agente de IA",
-            `Uma conexão usada pelos perfis ativos está ausente ou desativada (${connectionId}).`,
-          );
-        }
-        await settings.testConnection(connectionId);
-        validated.push(`${connection.label} (${connection.providerId})`);
-      }
-      return ok(
-        "agent",
-        "Agente de IA",
-        `${activeProfiles.length} perfil(is) ativo(s); conexão(ões) validada(s): ${validated.join(", ")}.`,
-      );
-    } catch (error) {
-      return failed(
-        "agent",
-        "Agente de IA",
-        `Uma conexão selecionada não passou no teste seguro: ${errorMessage(error)}`,
-      );
-    }
-  }
-  try {
-    const version = await commandProbe(config.codexBin, ["--version"]);
-    return ok("agent", "Agente de IA", version || "Codex CLI disponível.");
-  } catch (error) {
-    return warning(
-      "agent",
-      "Agente de IA",
-      `Worker habilitado, mas o Codex CLI não respondeu: ${errorMessage(error)}`,
-    );
-  }
-}
-
 async function probeDisk(dataDir: string, fallback: string): Promise<DoctorProbe> {
   try {
     const target = existsSync(dataDir) ? dataDir : fallback;
@@ -275,42 +170,6 @@ async function fetchWithTimeout(url: URL, fetcher: typeof fetch): Promise<Respon
   } finally {
     clearTimeout(timer);
   }
-}
-
-function probeCommand(
-  command: string,
-  argumentsList: string[],
-  timeoutMs = 5_000,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, argumentsList, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`tempo limite de ${timeoutMs}ms excedido`));
-    }, timeoutMs);
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve(stdout.trim());
-        return;
-      }
-      reject(new Error(stderr.trim() || `processo encerrou com código ${code ?? "?"}`));
-    });
-  });
 }
 
 function isProcessRunning(pid: number): boolean {

@@ -3,8 +3,7 @@ export { DirectoryStore } from "./directory-store.js";
 export { allowedStatusTransitions, assertStatusTransition } from "./status.js";
 export {
   SupportStore,
-  type ClaimedAgentJob,
-  type ClaimedInvestigationJob,
+  type ClaimedTriageAiJob,
   type CreateTicketInput,
   type HistoricalStaffResponseCaptureResult,
   type TicketListFilters,

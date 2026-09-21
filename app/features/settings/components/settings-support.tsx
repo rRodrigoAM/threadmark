@@ -1,88 +1,11 @@
 "use client";
 
-import { Check, CheckCircle2, CircleAlert, ShieldCheck, UserRound, X, type LucideIcon } from "lucide-react";
-import { type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { type AiConnection, type AiProviderId, type AiTaskKind, type AiTaskProfile, type SettingsRole, type StaffSettings } from "@/app/lib/settings";
+import { Check, CheckCircle2, CircleAlert, UserRound, X, type LucideIcon } from "lucide-react";
+import { type ReactNode } from "react";
+import { type SettingsRole, type StaffSettings } from "@/app/lib/settings";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { Card } from "@/app/components/ui/card";
-
-export const PROVIDERS: Array<{
-  id: AiProviderId;
-  label: string;
-  description: string;
-  requiresSecret: boolean;
-  supportsBaseUrl: boolean;
-  defaultBaseUrl: string;
-}> = [
-  {
-    id: "codex",
-    label: "Codex CLI",
-    description: "Orquestração local para sugestões de ticket e investigações profundas, usando sua sessão do Codex.",
-    requiresSecret: false,
-    supportsBaseUrl: false,
-    defaultBaseUrl: "",
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    description: "Sugestões de ticket e investigação contextual usando sua própria chave da API.",
-    requiresSecret: true,
-    supportsBaseUrl: true,
-    defaultBaseUrl: "https://api.openai.com/v1",
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    description: "Modelos Claude para sugestões de ticket e investigação contextual.",
-    requiresSecret: true,
-    supportsBaseUrl: true,
-    defaultBaseUrl: "https://api.anthropic.com/v1",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    description: "Acesso a diferentes modelos para cada tarefa por uma única conexão.",
-    requiresSecret: true,
-    supportsBaseUrl: true,
-    defaultBaseUrl: "https://openrouter.ai/api/v1",
-  },
-  {
-    id: "ollama",
-    label: "Ollama",
-    description: "Modelos executados localmente para qualquer tarefa, sem enviar dados para a nuvem.",
-    requiresSecret: false,
-    supportsBaseUrl: true,
-    defaultBaseUrl: "http://127.0.0.1:11434/api",
-  },
-];
-
-export const TASKS: Array<{
-  id: AiTaskKind;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: "triage",
-    label: "Sugestões de ticket",
-    description: "Separa contexto, elogios e demandas que podem virar ticket.",
-  },
-  {
-    id: "quick",
-    label: "Threadmark AI · Respostas rápidas",
-    description: "Usado em dúvidas diretas, confirmações e ações simples que não exigem uma investigação extensa.",
-  },
-  {
-    id: "deep",
-    label: "Threadmark AI · Investigações",
-    description: "Usado quando o pedido exige buscar conversas, banco, logs, código, ferramentas ou analisar imagens.",
-  },
-  {
-    id: "documentation",
-    label: "Documentações",
-    description: "Transforma tickets resolvidos em rascunhos revisáveis para a central de ajuda.",
-  },
-];
 
 export const inputClass =
   "mt-2 w-full min-w-0 max-w-full";
@@ -90,24 +13,6 @@ export const EMPTY_STAFF: StaffSettings = {
   identities: [],
   participants: [],
   restartRequired: false,
-};
-
-export const MANUAL_MODEL_VALUE = "__threadmark_manual_model__";
-
-export type ModelCatalogState = {
-  status: "loading" | "success" | "error";
-  models: string[];
-  message: string;
-};
-
-export type ConnectionDraft = {
-  id: string | null;
-  label: string;
-  providerId: AiProviderId;
-  baseUrl: string;
-  apiKey: string;
-  enabled: boolean;
-  hasSecret: boolean;
 };
 
 export function SectionLayout({ title, description, icon: Icon, action, children }: { title: string; description: string; icon: LucideIcon; action?: ReactNode; children: ReactNode }) {
@@ -148,96 +53,12 @@ export function RoleBadge({ role }: { role: SettingsRole }) {
   return <Badge variant="secondary">{roleLabel(role)}</Badge>;
 }
 
-export function Capability({ label }: { label: string }) {
-  return <Badge className="gap-1 text-xs" variant="secondary"><Check size={11} /> {label}</Badge>;
-}
-
-export function TaskSecurityNote({
-  connection,
-  taskKind,
-}: {
-  connection: AiConnection;
-  taskKind: AiTaskKind;
-}) {
-  const provider = providerMeta(connection.providerId);
-  let description: string;
-
-  if (
-    connection.providerId === "codex" &&
-    taskKind !== "deep" &&
-    taskKind !== "quick"
-  ) {
-    description = "Codex CLI local: execução efêmera, isolada e somente leitura, sem regras, MCPs ou acesso à codebase. Ao usar um modelo hospedado, o contexto selecionado é processado pela OpenAI.";
-  } else if (
-    (taskKind === "deep" || taskKind === "quick") &&
-    (connection.capabilities.codebaseAccess || connection.capabilities.localTools)
-  ) {
-    description = "Codex CLI local: execução somente leitura com acesso autorizado à codebase e às ferramentas configuradas. Ao usar um modelo hospedado, o contexto selecionado é processado pela OpenAI.";
-  } else if (connection.providerId === "codex") {
-    description = "Codex CLI local: execução somente leitura usando apenas o contexto persistido desta investigação. Ao usar um modelo hospedado, esse contexto é processado pela OpenAI.";
-  } else if (connection.providerId === "ollama") {
-    description = "Ollama local: o contexto permanece nesta máquina e esta etapa não recebe acesso à codebase.";
-  } else {
-    description = `${provider.label}: somente o contexto necessário será enviado ao provedor, sem acesso à codebase ou às ferramentas locais.`;
-  }
-
-  return (
-    <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs leading-5 text-emerald-800">
-      <ShieldCheck className="mt-0.5 shrink-0 text-emerald-600" size={14} />
-      <span>{description}</span>
-    </div>
-  );
-}
-
 export function SecurityCard({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
   return <Card className="gap-0 p-5 py-5"><span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><Icon size={18} /></span><h3 className="mt-4 font-semibold text-foreground">{title}</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">{children}</p></Card>;
 }
 
 export function PermissionRow({ active, label, description }: { active: boolean; label: string; description: string }) {
   return <div className={`flex gap-3 rounded-xl p-3 ${active ? "bg-primary/10" : "bg-muted/60"}`}><span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{active ? <Check size={12} /> : <UserRound size={11} />}</span><div><strong className={`text-sm ${active ? "text-primary" : "text-foreground"}`}>{label}{active ? " · sua função" : ""}</strong><p className="mt-0.5 text-xs leading-5 text-muted-foreground">{description}</p></div></div>;
-}
-
-export function providerMeta(providerId: AiProviderId) {
-  return PROVIDERS.find((provider) => provider.id === providerId) ?? PROVIDERS[0];
-}
-
-export function getModelSuggestions(
-  connection: AiConnection | null,
-  discoveredModels: string[],
-): Array<{ value: string; label?: string }> {
-  const suggestions = new Map<string, { value: string; label?: string }>();
-  if (connection?.providerId === "codex") {
-    suggestions.set("default", {
-      value: "default",
-      label: "Padrão da conta Codex",
-    });
-  }
-  for (const discoveredModel of discoveredModels) {
-    const model = discoveredModel.trim();
-    if (model && !suggestions.has(model)) suggestions.set(model, { value: model });
-  }
-
-  return [...suggestions.values()];
-}
-
-export function emptyConnectionDraft(): ConnectionDraft {
-  return { id: null, label: "", providerId: "openai", baseUrl: "https://api.openai.com/v1", apiKey: "", enabled: true, hasSecret: false };
-}
-
-export function connectionDraft(connection: AiConnection): ConnectionDraft {
-  return { id: connection.id, label: connection.label, providerId: connection.providerId, baseUrl: connection.baseUrl ?? "", apiKey: "", enabled: connection.enabled, hasSecret: connection.hasSecret };
-}
-
-export function emptyProfile(taskKind: AiTaskKind): AiTaskProfile {
-  return { taskKind, connectionId: null, model: "", enabled: false, updatedAt: "" };
-}
-
-export function completeProfiles(profiles: AiTaskProfile[]): AiTaskProfile[] {
-  return TASKS.map((task) => profiles.find((profile) => profile.taskKind === task.id) ?? emptyProfile(task.id));
-}
-
-export function updateProfileDraft(setter: Dispatch<SetStateAction<AiTaskProfile[]>>, taskKind: AiTaskKind, patch: Partial<AiTaskProfile>) {
-  setter((current) => completeProfiles(current).map((profile) => profile.taskKind === taskKind ? { ...profile, ...patch } : profile));
 }
 
 export function roleLabel(role: SettingsRole): string {

@@ -546,7 +546,6 @@ export class AutomationRuntime {
         connectedAppId,
         actionId,
         mcpAutomationArguments(rendered),
-        "automation",
         context.signal,
       );
       return result.structuredContent ?? result.content;

@@ -7,6 +7,7 @@ import { getWhatsappQr, getWhatsappRuntime, renewWhatsappQr, type WhatsappQrStat
 import type { RuntimeState } from "@/app/lib/types";
 import { Button } from "@/app/components/ui/button";
 import { SectionLayout, Notice, PermissionNotice, Metric, formatDate, errorMessage } from "../settings-support";
+import { AudioTranscriptionSection } from "../audio-transcription-section";
 
 export function WhatsappSection({
   canManage,
@@ -24,6 +25,10 @@ export function WhatsappSection({
   const [refreshing, setRefreshing] = useState(false);
   const [generatingQr, setGeneratingQr] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
+  const [transcriptionFeedback, setTranscriptionFeedback] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
   const connected = runtime?.whatsappConnected === true;
 
   async function refresh() {
@@ -75,7 +80,8 @@ export function WhatsappSection({
   }
 
   return (
-    <SectionLayout description="Conecte a conta usada apenas para capturar conversas recebidas." icon={QrCode} title="Conexão do WhatsApp">
+    <div className="space-y-6">
+      <SectionLayout description="Conecte a conta usada apenas para capturar conversas recebidas." icon={QrCode} title="Conexão do WhatsApp">
       {!canManage ? <PermissionNotice /> : null}
       <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
         <div className="flex gap-3">
@@ -116,6 +122,16 @@ export function WhatsappSection({
           )}
         </div>
       </div>
-    </SectionLayout>
+      </SectionLayout>
+      {transcriptionFeedback ? (
+        <Notice tone={transcriptionFeedback.tone} title="Transcrição de áudio">
+          {transcriptionFeedback.message}
+        </Notice>
+      ) : null}
+      <AudioTranscriptionSection
+        canManage={canManage}
+        onFeedback={(tone, message) => setTranscriptionFeedback({ tone, message })}
+      />
+    </div>
   );
 }

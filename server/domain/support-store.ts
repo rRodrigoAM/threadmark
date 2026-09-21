@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type {
   AddTicketInternalNoteInput,
-  AddInvestigationThreadMessageInput,
+
   AttachmentDto,
   AuthRole,
   AttachConversationMessagesInput,
@@ -32,35 +32,11 @@ import type {
   DashboardOperationalMetricsDto,
   DashboardPeriodDto,
   DashboardPeriodInput,
-  DocumentationDraftDto,
-  DocumentationDraftListResponse,
-  DocumentationDraftStatus,
-  KnowledgeObjectDto,
-  KnowledgeReviewFeedbackInput,
-  UpdateKnowledgeObjectInput,
-  DeleteDocumentationDraftResponse,
-  UpdateDocumentationDraftInput,
+
   DashboardResponse,
   DeleteClientResponse,
   DeleteTicketInput,
   DeleteTicketResponse,
-  InvestigationJobListResponse,
-  InvestigationJobState,
-  InvestigationOutcome,
-  InvestigationPackDto,
-  InvestigationToolExecutionDto,
-  InvestigationThreadDto,
-  InvestigationThreadMessageDto,
-  InvestigationThreadSummaryDto,
-  InvestigationThreadTurnDto,
-  InvestigationTurnResultDto,
-  ThreadmarkAiContextDto,
-  ThreadmarkAiImageMimeType,
-  ThreadmarkAiThreadDto,
-  ThreadmarkAiThreadListResponse,
-  CreateThreadmarkAiThreadInput,
-  InvestigateTicketResponse,
-  LatestInvestigationDto,
   OperationalGroupDto,
   ResolutionDto,
   RuntimeStatusDto,
@@ -97,11 +73,7 @@ import type {
 
 import {
   DASHBOARD_TIME_ZONE,
-  INVESTIGATION_OUTCOMES,
-  INVESTIGATION_JOB_STATES,
-  INVESTIGATION_THREAD_MESSAGE_MAX_LENGTH,
-  INVESTIGATION_TURN_PHASES,
-  THREADMARK_AI_IMAGE_MAX_COUNT,
+
   PRODUCT_FORWARDING_DESCRIPTION_MAX_LENGTH,
   PRODUCT_FORWARDING_EXTERNAL_REFERENCE_MAX_LENGTH,
   PRODUCT_FORWARDING_TITLE_MAX_LENGTH,
@@ -114,22 +86,10 @@ import {
 import type { SupportDatabase } from "../db/index.js";
 import type {
   AnalysisCategoryCatalog,
-  DocumentationDraftInput,
-  DocumentationDraftResult,
-  KnowledgeExtractionInput,
-  KnowledgeExtractionResult,
-  InvestigationThreadInput,
-  InvestigationToolResult,
-  InvestigationTurnResult,
-  SupportAnalysis,
-  SupportAnalysisInput,
   TriageAnalysis,
   TriageAnalysisInput,
 } from "../agent/types.js";
-import { DOCUMENTATION_PROMPT_VERSION } from "../agent/prompt.js";
-import { KNOWLEDGE_EXTRACTION_PROMPT_VERSION } from "../agent/prompt.js";
-import { isTaskContinuationInstruction } from "../agent/confirmation-intent.js";
-import { renderKnowledgeDocument } from "../knowledge/renderer.js";
+
 import type {
   QuotedTicketReference,
   TopicTicketCandidate,
@@ -141,7 +101,6 @@ import {
   DEFAULT_ANALYSIS_CATEGORY_CATALOG,
   normalizeAnalysisCategories,
   normalizeCatalogCategory,
-  normalizeCategoriesForAnalysis,
 } from "./category-policy.js";
 import { highestTicketPriority } from "../triage/ticket-priority.js";
 import {
@@ -161,17 +120,6 @@ import {
   preferredParticipantDisplayName,
 } from "./participant-identity.js";
 import { assertStatusTransition } from "./status.js";
-
-interface InvestigationMessageActor {
-  userId: string | null;
-  role: AuthRole;
-}
-
-interface DeletedThreadmarkAiThread {
-  id: string;
-  deleted: true;
-  attachmentPaths: string[];
-}
 
 const DEFAULT_TRIAGE_AI_MODEL = "gpt-5.4-mini";
 const DEFAULT_TRIAGE_SILENCE_WINDOW_SECONDS = 180;
@@ -288,15 +236,6 @@ export interface UpsertAttachmentInput {
   available?: boolean;
 }
 
-export interface InvestigationThreadImageInput {
-  id: string;
-  fileName: string;
-  mimeType: ThreadmarkAiImageMimeType;
-  localPath: string;
-  sizeBytes: number;
-  sha256: string;
-}
-
 interface AttachmentMaterialState {
   id: string;
   kind: AttachmentDto["kind"];
@@ -382,26 +321,10 @@ export type TicketCapacityAssignmentResult =
   | { kind: "terminal_ticket"; status: TicketStatus }
   | { kind: "waiting"; reason: "capacity_full" | "no_active_assignees" };
 
-export interface InvestigationJobListFilters {
-  states?: InvestigationJobState[];
-  limit?: number;
-}
-
-export interface QueueInvestigationOptions {
-  actor?: string;
-  trigger?: "manual" | "ticket_created" | "new_customer_message" | "context_changed";
-}
-
 export interface HistoricalStaffResponseCaptureResult {
   ticketId: string;
   responseCaptured: boolean;
   reanalysisRequired: boolean;
-}
-
-export interface CancelInvestigationThreadResult {
-  thread: InvestigationThreadDto;
-  cancelledJobId: string | null;
-  newlyCancelled: boolean;
 }
 
 export interface TriageCandidate {
@@ -429,6 +352,15 @@ export interface TriageCandidate {
     isStaff: boolean;
   };
   attachments: AttachmentDto[];
+}
+
+/** Lease payload for the external, headless triage worker. */
+export interface ClaimedTriageAiJob {
+  kind: "triage";
+  id: string;
+  groupId: string;
+  model: string;
+  attemptCount: number;
 }
 
 export interface RecordTriageSuggestionInput {
@@ -523,39 +455,6 @@ export interface UpsertIdentityLinkInput {
   source: string;
   observedAt: string;
 }
-
-export interface ClaimedInvestigationJob {
-  id: string;
-  ticketId: string;
-  instructions: string | null;
-}
-
-export interface ClaimedInvestigationThreadJob {
-  id: string;
-  threadId: string;
-  ticketId: string | null;
-  operatorMessageId: string;
-  attemptCount: number;
-}
-
-export type ClaimedAgentJob =
-  | ({ kind: "automatic" } & ClaimedInvestigationJob)
-  | ({ kind: "thread_turn" } & ClaimedInvestigationThreadJob)
-  | {
-      kind: "triage";
-      id: string;
-      groupId: string;
-      model: string;
-      attemptCount: number;
-    }
-  | {
-      kind: "documentation";
-      id: string;
-      draftId: string;
-      ticketId: string;
-      attemptCount: number;
-      phase: "extraction" | "document";
-    };
 
 interface EntityRecord {
   id: string;
@@ -654,19 +553,19 @@ function describeTicketEvent(input: {
     case "investigation_completed":
       return "A IA concluiu a investigação automática.";
     case "investigation_failed":
-      return "A investigação automática da IA falhou.";
+      return "A análise automática legada falhou.";
     case "investigation_thread_created":
-      return "Conversa do Threadmark AI criada.";
+      return "Conversa de análise legada criada.";
     case "investigation_thread_message_queued":
-      return "Mensagem do operador enviada ao Threadmark AI.";
+      return "Mensagem do operador enviada à análise legada.";
     case "investigation_thread_turn_started":
-      return "O Threadmark AI iniciou a análise.";
+      return "A análise legada foi iniciada.";
     case "investigation_thread_turn_completed":
-      return "O Threadmark AI concluiu a análise.";
+      return "A análise legada foi concluída.";
     case "investigation_thread_turn_failed":
-      return "A análise do Threadmark AI falhou.";
+      return "A análise legada falhou.";
     case "investigation_thread_turn_cancelled":
-      return `A análise do Threadmark AI foi interrompida por ${input.actor}.`;
+      return `A análise legada foi interrompida por ${input.actor}.`;
     case "ticket_category_added":
       return "Categoria vinculada ao ticket.";
     case "ticket_category_removed":
@@ -909,16 +808,6 @@ function attachmentMateriallyDiffers(
   );
 }
 
-function includesInvestigationInstruction(
-  existing: string | null,
-  candidate: string | null,
-): boolean {
-  if (!candidate) return true;
-  return (existing ?? "")
-    .split(/\n{2,}/u)
-    .some((instruction) => instruction.trim() === candidate);
-}
-
 function nextUtcTimestampAfter(value: string): string {
   const previousTimestamp = Date.parse(value);
   return new Date(
@@ -1088,92 +977,6 @@ function parseJson<T>(json: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function nullableString(value: unknown): string | null {
-  return value === null || value === undefined ? null : String(value);
-}
-
-function nullableTrimmed(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized || null;
-}
-
-function knowledgeSimilarity(left: string, right: string): number {
-  const tokens = (value: string) => new Set(
-    value.toLocaleLowerCase("pt-BR")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .split(/[^a-z0-9]+/)
-      .filter((token) => token.length > 2),
-  );
-  const a = tokens(left);
-  const b = tokens(right);
-  if (!a.size || !b.size) return 0;
-  const intersection = [...a].filter((token) => b.has(token)).length;
-  const union = new Set([...a, ...b]).size;
-  return Math.round((intersection / union) * 1000) / 1000;
-}
-
-function assertKnowledgeIntegrity(input: UpdateKnowledgeObjectInput): void {
-  const evidenceIds = new Set(input.evidence.map((item) => item.id));
-  if (evidenceIds.size !== input.evidence.length) {
-    throw new ValidationError("As evidências precisam possuir identificadores únicos");
-  }
-  const references = [
-    ...input.operationalEvidenceIds,
-    ...input.claims.flatMap((claim) => claim.evidenceIds),
-    ...input.causes.flatMap((cause) => cause.evidenceIds),
-  ];
-  if (references.some((id) => !evidenceIds.has(id))) {
-    throw new ValidationError("O conhecimento referencia uma evidência inexistente");
-  }
-  if (input.claims.some((claim) => claim.kind !== "HYPOTHESIS" && !claim.evidenceIds.length)) {
-    throw new ValidationError("Fatos, evidências e inferências exigem referência auditável");
-  }
-  const hasOperationalContent = Boolean(input.solution?.trim() || input.procedure.some((item) => item.trim()));
-  if (hasOperationalContent && !input.operationalEvidenceIds.length) {
-    throw new ValidationError("Solução e procedimento exigem evidência operacional");
-  }
-  if (hasOperationalContent && input.confidence === "LOW") {
-    throw new ValidationError("Conhecimento de baixa confiança não pode conter instrução operacional");
-  }
-  if (input.status === "APPROVED" && (input.confidence === "LOW" || input.candidate !== "YES")) {
-    throw new ValidationError("Somente conhecimento reutilizável e suficientemente confirmado pode ser aprovado");
-  }
-}
-
-function normalizeThreadmarkAiContext(
-  value: ThreadmarkAiContextDto | null | undefined,
-): ThreadmarkAiContextDto | null {
-  if (!value) return null;
-  const context: ThreadmarkAiContextDto = {
-    route: normalizedNullableText(value.route)?.slice(0, 500) ?? null,
-    label: normalizedNullableText(value.label)?.slice(0, 300) ?? null,
-    ticketId: normalizedNullableText(value.ticketId)?.slice(0, 200) ?? null,
-    ticketNumber:
-      Number.isInteger(value.ticketNumber) && (value.ticketNumber ?? 0) > 0
-        ? value.ticketNumber
-        : null,
-    groupId: normalizedNullableText(value.groupId)?.slice(0, 200) ?? null,
-    groupName: normalizedNullableText(value.groupName)?.slice(0, 300) ?? null,
-  };
-  return Object.values(context).some((item) => item !== null) ? context : null;
-}
-
-function parseThreadmarkAiContext(json: string | null): ThreadmarkAiContextDto | null {
-  const parsed = parseJson<unknown>(json, null);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const value = parsed as Partial<ThreadmarkAiContextDto>;
-  return normalizeThreadmarkAiContext({
-    route: typeof value.route === "string" ? value.route : null,
-    label: typeof value.label === "string" ? value.label : null,
-    ticketId: typeof value.ticketId === "string" ? value.ticketId : null,
-    ticketNumber:
-      typeof value.ticketNumber === "number" ? value.ticketNumber : null,
-    groupId: typeof value.groupId === "string" ? value.groupId : null,
-    groupName: typeof value.groupName === "string" ? value.groupName : null,
-  });
 }
 
 function databaseHasTable(database: SupportDatabase, table: string): boolean {
@@ -1363,103 +1166,7 @@ function decodePageCursor(
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function trimmedString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  return value.trim() || null;
-}
-
-function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => trimmedString(item))
-    .filter((item): item is string => item !== null);
-}
-
-function investigationOutcome(value: unknown): InvestigationOutcome | null {
-  return typeof value === "string" &&
-    INVESTIGATION_OUTCOMES.includes(value as InvestigationOutcome)
-    ? (value as InvestigationOutcome)
-    : null;
-}
-
-const THREAD_PROMPT_MESSAGE_LIMIT = 16;
-const THREAD_PROMPT_CHARACTER_LIMIT = 24_000;
-const THREAD_PROMPT_TICKET_MESSAGE_LIMIT = 100;
-const TOOL_AUDIT_REQUEST_ID_MAX_LENGTH = 200;
-const TOOL_AUDIT_IDENTITY_MAX_LENGTH = 500;
-const TOOL_AUDIT_ARGUMENTS_MAX_LENGTH = 20_000;
-const TOOL_AUDIT_PURPOSE_MAX_LENGTH = 4_000;
-const TOOL_AUDIT_SUMMARY_MAX_LENGTH = 4_000;
-const TOOL_AUDIT_CONTENT_MAX_LENGTH = 50_000;
-const SUPPORT_PROMPT_CHARACTER_LIMIT = 64_000;
-const SUPPORT_PROMPT_MESSAGE_TEXT_LIMIT = 8_000;
-const SUPPORT_PROMPT_ATTACHMENT_TEXT_LIMIT = 8_000;
-const SUPPORT_PROMPT_SENT_RESPONSE_LIMIT = 8;
-const SUPPORT_PROMPT_RESOLVED_PRECEDENT_LIMIT = 5;
 const SENT_RESPONSE_DEDUPLICATION_LIMIT = 50;
-const AUTOMATIC_INVESTIGATION_PROMPT_VERSION = "support-analysis-v3";
-const DEEP_INVESTIGATION_PROMPT_VERSION = "investigation-thread-v2";
-
-function truncatePromptText(value: string, limit: number): string {
-  if (limit <= 0) return "";
-  if (value.length <= limit) return value;
-  const marker = "\n[… conteúdo intermediário omitido do prompt; original preservado no SQLite …]\n";
-  if (limit <= marker.length) return value.slice(0, limit);
-  const available = Math.max(0, limit - marker.length);
-  const beginning = Math.ceil(available * 0.6);
-  const ending = available - beginning;
-  return `${value.slice(0, beginning)}${marker}${ending > 0 ? value.slice(-ending) : ""}`;
-}
-
-function truncateToolAuditContent(value: string): string {
-  if (value.length <= TOOL_AUDIT_CONTENT_MAX_LENGTH) return value;
-  const marker =
-    "\n[… conteúdo excedente omitido da auditoria; consulte a referência da execução quando disponível …]\n";
-  const available = TOOL_AUDIT_CONTENT_MAX_LENGTH - marker.length;
-  const beginning = Math.ceil(available * 0.7);
-  const ending = available - beginning;
-  return `${value.slice(0, beginning)}${marker}${value.slice(-ending)}`;
-}
-
-function limitSupportPromptMessages(
-  messages: SupportAnalysisInput["messages"],
-): SupportAnalysisInput["messages"] {
-  const selected: SupportAnalysisInput["messages"] = [];
-  let remaining = SUPPORT_PROMPT_CHARACTER_LIMIT;
-
-  for (const message of messages.toReversed()) {
-    const text = message.text && remaining > 0
-      ? truncatePromptText(
-          message.text,
-          Math.min(SUPPORT_PROMPT_MESSAGE_TEXT_LIMIT, remaining),
-        )
-      : null;
-    remaining -= text?.length ?? 0;
-
-    const attachments = message.attachments.map((attachment) => {
-      if (!attachment.extractedText || remaining <= 0) {
-        return { ...attachment, extractedText: null };
-      }
-      const extractedText = truncatePromptText(
-        attachment.extractedText,
-        Math.min(SUPPORT_PROMPT_ATTACHMENT_TEXT_LIMIT, remaining),
-      );
-      remaining -= extractedText.length;
-      return { ...attachment, extractedText };
-    });
-    selected.push({ ...message, text, attachments });
-  }
-
-  return selected.reverse();
-}
 
 function responsesAreEquivalent(left: string, right: string): boolean {
   const normalizedLeft = normalizedRoutingText(left);
@@ -1469,25 +1176,6 @@ function responsesAreEquivalent(left: string, right: string): boolean {
 
 function exactResponseBodiesMatch(left: string, right: string): boolean {
   return left.trim().toLocaleLowerCase("pt-BR") === right.trim().toLocaleLowerCase("pt-BR");
-}
-
-function limitRecentThreadMessages(
-  messages: InvestigationThreadInput["recentMessages"],
-): InvestigationThreadInput["recentMessages"] {
-  const selected: InvestigationThreadInput["recentMessages"] = [];
-  let characterCount = 0;
-
-  for (const message of messages.toReversed()) {
-    if (selected.length >= THREAD_PROMPT_MESSAGE_LIMIT) break;
-    const available = THREAD_PROMPT_CHARACTER_LIMIT - characterCount;
-    if (available <= 0) break;
-    const body = message.body.slice(-available);
-    if (!body) continue;
-    selected.push({ ...message, body });
-    characterCount += body.length;
-  }
-
-  return selected.reverse();
 }
 
 function slugify(value: string): string {
@@ -2016,7 +1704,7 @@ export class SupportStore {
            WHERE id = ?`,
         )
         .run(targetClient.id, affectedStoreId, timestamp, ticketId);
-      this.invalidateLegacyAutomaticGuidance(ticketId, timestamp);
+      this.invalidateTicketGuidance(ticketId, timestamp);
 
       if (rememberForConversation) {
         this.database
@@ -2141,7 +1829,7 @@ export class SupportStore {
            WHERE id = ?`,
         )
         .run(title, summary, input.priority, requesterId, timestamp, ticketId);
-      this.invalidateLegacyAutomaticGuidance(ticketId, timestamp);
+      this.invalidateTicketGuidance(ticketId, timestamp);
 
       const fieldLabels: Record<string, string> = {
         title: "título",
@@ -3730,7 +3418,6 @@ export class SupportStore {
         action: "create",
         messageIds: messages.map((message) => message.id),
         ticket: this.getTicketDetail(ticket.id),
-        investigationJobId: null,
       };
     })();
   }
@@ -3778,6 +3465,7 @@ export class SupportStore {
         }
       }
       if (attached > 0) {
+        this.invalidateTicketGuidance(ticket.id, nowUtc());
         this.insertTicketEvent({
           ticketId: ticket.id,
           eventType: "messages_attached_batch",
@@ -3806,7 +3494,6 @@ export class SupportStore {
         action: "attach",
         messageIds: messages.map((message) => message.id),
         ticket: this.getTicketDetail(ticket.id),
-        investigationJobId: null,
       };
     })();
   }
@@ -4654,11 +4341,7 @@ export class SupportStore {
           id,
         );
       this.captureAvailableStaffAttachmentResponses(input.messageId, timestamp);
-      if (
-        materialChanged &&
-        input.available !== false &&
-        new Set(["image", "pdf", "document"]).has(input.kind)
-      ) {
+      if (materialChanged) {
         this.invalidateTicketsForMaterialAttachment(input.messageId, timestamp);
       }
       return { id };
@@ -4730,11 +4413,7 @@ export class SupportStore {
         timestamp,
       ) as EntityRecord;
     this.captureAvailableStaffAttachmentResponses(input.messageId, timestamp);
-    if (
-      materialChanged &&
-      input.available !== false &&
-      new Set(["image", "pdf", "document"]).has(input.kind)
-    ) {
+    if (materialChanged) {
       this.invalidateTicketsForMaterialAttachment(input.messageId, timestamp);
     }
     return attachment;
@@ -4955,6 +4634,49 @@ export class SupportStore {
     });
   }
 
+  importExternalSourceMessagesToTicket(
+    ticketId: string,
+    input: {
+      sourceType: string;
+      sourceConversationId: string;
+      messages: ReadonlyArray<{
+        id: string;
+        author: string;
+        authorRole: "customer" | "support";
+        body: string;
+        occurredAt: string;
+      }>;
+      actor: string;
+    },
+  ): { importedCount: number; ticket: TicketDetailDto } {
+    return this.database.transaction(() => {
+      const importedAt = nowUtc();
+      const importedCount = this.attachExternalSourceMessagesToTicket(ticketId, {
+        sourceType: input.sourceType,
+        sourceConversationId: input.sourceConversationId,
+        messages: input.messages,
+        createdAt: importedAt,
+      });
+      if (importedCount > 0) {
+        this.insertTicketEvent({
+          ticketId,
+          eventType: "external_messages_imported",
+          actor: input.actor,
+          fromStatus: null,
+          toStatus: null,
+          data: {
+            description: `${importedCount} mensagem(ns) externa(s) importada(s) para o ticket.`,
+            sourceType: input.sourceType,
+            sourceConversationId: input.sourceConversationId,
+            importedCount,
+          },
+          occurredAt: importedAt,
+        });
+      }
+      return { importedCount, ticket: this.getTicketDetail(ticketId) };
+    })();
+  }
+
   attachExternalSourceMessagesToTicket(
     ticketId: string,
     input: {
@@ -4969,8 +4691,8 @@ export class SupportStore {
       }>;
       createdAt?: string;
     },
-  ): void {
-    this.database.transaction(() => {
+  ): number {
+    return this.database.transaction(() => {
       if (!this.externalTicketMessagesAvailable) {
         throw new ValidationError("Mensagens de origem externa não estão disponíveis neste banco");
       }
@@ -4993,6 +4715,7 @@ export class SupportStore {
       );
       let firstOccurredAt: string | null = null;
       let lastOccurredAt: string | null = null;
+      let importedCount = 0;
       input.messages.forEach((message, position) => {
         const externalMessageId = normalizedBoundedText(
           message.id,
@@ -5001,13 +4724,15 @@ export class SupportStore {
         );
         const author = normalizedBoundedText(message.author, "Autor da mensagem externa", 200);
         const body = normalizedBoundedText(message.body, "Conteúdo da mensagem externa", 20_000);
-        if (Number.isNaN(Date.parse(message.occurredAt))) {
+        const occurredAtTimestamp = Date.parse(message.occurredAt);
+        if (Number.isNaN(occurredAtTimestamp)) {
           throw new ValidationError("Data da mensagem externa é inválida");
         }
+        const occurredAt = new Date(occurredAtTimestamp).toISOString();
         const id = `ticket-external-message:${createHash("sha256")
           .update(`${ticketId}\0${sourceType}\0${sourceConversationId}\0${externalMessageId}`)
           .digest("hex")}`;
-        insert.run(
+        const inserted = insert.run(
           id,
           ticketId,
           sourceType,
@@ -5016,15 +4741,19 @@ export class SupportStore {
           author,
           message.authorRole,
           body,
-          message.occurredAt,
+          occurredAt,
           position,
           createdAt,
         );
-        firstOccurredAt = firstOccurredAt === null || message.occurredAt < firstOccurredAt
-          ? message.occurredAt
+        if (inserted.changes === 0) {
+          return;
+        }
+        importedCount += inserted.changes;
+        firstOccurredAt = firstOccurredAt === null || occurredAt < firstOccurredAt
+          ? occurredAt
           : firstOccurredAt;
-        lastOccurredAt = lastOccurredAt === null || message.occurredAt > lastOccurredAt
-          ? message.occurredAt
+        lastOccurredAt = lastOccurredAt === null || occurredAt > lastOccurredAt
+          ? occurredAt
           : lastOccurredAt;
       });
       if (firstOccurredAt && lastOccurredAt) {
@@ -5036,6 +4765,7 @@ export class SupportStore {
            WHERE id = ?`,
         ).run(firstOccurredAt, lastOccurredAt, createdAt, ticketId);
       }
+      return importedCount;
     })();
   }
 
@@ -5046,7 +4776,7 @@ export class SupportStore {
       if (!inserted) {
         return;
       }
-      this.invalidateLegacyAutomaticGuidance(ticketId, timestamp);
+      this.invalidateTicketGuidance(ticketId, timestamp);
       this.captureAttachedStaffMessage(ticketId, messageId, timestamp);
       this.insertTicketEvent({
         ticketId,
@@ -5192,7 +4922,7 @@ export class SupportStore {
         },
         occurredAt: timestamp,
       });
-      this.invalidateLegacyAutomaticGuidance(ticketId, timestamp);
+      this.invalidateTicketGuidance(ticketId, timestamp);
 
       return this.getTicketDetail(ticketId);
     })();
@@ -5260,47 +4990,15 @@ export class SupportStore {
             (SELECT COUNT(*) FROM suggestions WHERE ticket_id = ?) AS suggestions,
             (SELECT COUNT(*) FROM sent_responses WHERE ticket_id = ?) AS sent_responses,
             (SELECT COUNT(*) FROM resolutions WHERE ticket_id = ?) AS resolutions,
-            (SELECT COUNT(*) FROM evidence_queries WHERE ticket_id = ?) AS evidence_queries,
-            (SELECT COUNT(*) FROM investigation_jobs WHERE ticket_id = ?) AS investigation_jobs,
-            (SELECT COUNT(*) FROM investigation_threads WHERE ticket_id = ?) AS investigation_threads,
-            (SELECT COUNT(*)
-             FROM investigation_thread_messages message
-             JOIN investigation_threads thread ON thread.id = message.thread_id
-             WHERE thread.ticket_id = ?) AS investigation_thread_messages,
-            (SELECT COUNT(*)
-             FROM investigation_thread_jobs job
-             JOIN investigation_threads thread ON thread.id = job.thread_id
-             WHERE thread.ticket_id = ?) AS investigation_thread_jobs,
-            (SELECT COUNT(*)
-             FROM investigation_thread_tool_executions execution
-             JOIN investigation_thread_jobs job ON job.id = execution.job_id
-             JOIN investigation_threads thread ON thread.id = job.thread_id
-             WHERE thread.ticket_id = ?) AS investigation_thread_tool_executions`,
+            (SELECT COUNT(*) FROM evidence_queries WHERE ticket_id = ?) AS evidence_queries`,
         )
-        .get(
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-          ticketId,
-        ) as {
+        .get(ticketId, ticketId, ticketId, ticketId, ticketId, ticketId) as {
         ticket_events: number;
         categories: number;
         suggestions: number;
         sent_responses: number;
         resolutions: number;
         evidence_queries: number;
-        investigation_jobs: number;
-        investigation_threads: number;
-        investigation_thread_messages: number;
-        investigation_thread_jobs: number;
-        investigation_thread_tool_executions: number;
       };
       const preservedAttachments = messageRows.length
         ? (
@@ -5314,6 +5012,8 @@ export class SupportStore {
           ).count
         : 0;
 
+      // Compatibility cleanup for inert historical investigation rows. The
+      // tables and migration history remain intact for existing installations.
       this.database
         .prepare(
           `DELETE FROM investigation_thread_jobs
@@ -5397,12 +5097,6 @@ export class SupportStore {
           sentResponses: counts.sent_responses,
           resolutions: counts.resolutions,
           evidenceQueries: counts.evidence_queries,
-          investigationJobs: counts.investigation_jobs,
-          investigationThreads: counts.investigation_threads,
-          investigationThreadMessages: counts.investigation_thread_messages,
-          investigationThreadJobs: counts.investigation_thread_jobs,
-          investigationThreadToolExecutions:
-            counts.investigation_thread_tool_executions,
         },
         preserved: {
           messages: messageRows.length,
@@ -6066,7 +5760,7 @@ export class SupportStore {
 
   claimNextTriageAiJob(
     leaseMs = 10 * 60_000,
-  ): Extract<ClaimedAgentJob, { kind: "triage" }> | null {
+  ): ClaimedTriageAiJob | null {
     if (!Number.isFinite(leaseMs) || leaseMs < 1_000) {
       throw new ValidationError("Lease do job deve ser de pelo menos 1000ms");
     }
@@ -7856,13 +7550,6 @@ export class SupportStore {
             validatedBy: input.resolution.validatedBy ?? input.actor ?? "Operador local",
           });
         }
-        if (isTerminalTicketStatus(nextStatus)) {
-          this.closeAutomaticInvestigationLifecycle(
-            ticketId,
-            nowUtc(),
-            `Ticket ${TICKET_STATUS_LABELS[nextStatus].toLocaleLowerCase("pt-BR")}; investigação automática cancelada.`,
-          );
-        }
         return this.getTicketDetail(ticketId);
       }
       const existingResolution =
@@ -7913,13 +7600,6 @@ export class SupportStore {
         });
       }
 
-      if (isTerminalTicketStatus(nextStatus)) {
-        this.closeAutomaticInvestigationLifecycle(
-          ticketId,
-          timestamp,
-          `Ticket ${TICKET_STATUS_LABELS[nextStatus].toLocaleLowerCase("pt-BR")}; investigação automática cancelada.`,
-        );
-      }
 
       this.insertTicketEvent({
         ticketId,
@@ -8072,11 +7752,6 @@ export class SupportStore {
             ticketId,
           );
         }
-        this.closeAutomaticInvestigationLifecycle(
-          ticketId,
-          timestamp,
-          `Ticket ${TICKET_STATUS_LABELS[targetStatus].toLocaleLowerCase("pt-BR")}; investigação automática cancelada.`,
-        );
         this.insertTicketEvent({
           ticketId,
           eventType: "status_changed",
@@ -8111,1309 +7786,6 @@ export class SupportStore {
     }).immediate();
   }
 
-  queueInvestigation(
-    ticketId: string,
-    instructions?: string,
-    options: QueueInvestigationOptions = {},
-  ): InvestigateTicketResponse {
-    const ticketClient = this.database
-      .prepare(
-        `SELECT c.id, c.ignored_at, t.status
-         FROM tickets t
-         JOIN clients c ON c.id = t.client_id
-         WHERE t.id = ?`,
-      )
-      .get(ticketId) as
-      | { id: string; ignored_at: string | null; status: TicketStatus }
-      | undefined;
-    if (!ticketClient) throw new NotFoundError("Ticket", ticketId);
-    if (ticketClient.ignored_at) {
-      throw new ConflictError(
-        "O cliente foi excluído da operação e não pode iniciar novas investigações",
-        { clientId: ticketClient.id },
-      );
-    }
-    if (isTerminalTicketStatus(ticketClient.status)) {
-      throw new ConflictError(
-        "Tickets resolvidos ou arquivados não podem iniciar uma investigação automática",
-        { ticketId, status: ticketClient.status },
-      );
-    }
-    const normalizedInstructions = instructions?.trim() || null;
-    const actor = options.actor?.trim() || "Operador local";
-    const trigger = options.trigger ?? "manual";
-    const timestamp = nowUtc();
-    const job = this.database.transaction(() => {
-      if (trigger === "new_customer_message" || trigger === "context_changed") {
-        this.supersedeCandidateSuggestions(ticketId, timestamp);
-        this.database
-          .prepare(
-            `UPDATE tickets
-             SET next_action = NULL, updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(timestamp, ticketId);
-      }
-      const active = this.database
-        .prepare(
-          `SELECT id, state, instructions, rerun_requested, rerun_instructions
-           FROM investigation_jobs
-           WHERE ticket_id = ? AND state IN ('queued', 'running')
-           ORDER BY requested_at LIMIT 1`,
-        )
-        .get(ticketId) as
-        | {
-            id: string;
-            state: "queued" | "running";
-            instructions: string | null;
-            rerun_requested: number;
-            rerun_instructions: string | null;
-          }
-        | undefined;
-
-      if (active) {
-        if (active.state === "queued") {
-          if (
-            normalizedInstructions &&
-            !includesInvestigationInstruction(
-              active.instructions,
-              normalizedInstructions,
-            )
-          ) {
-            this.database
-              .prepare(
-                `UPDATE investigation_jobs
-                 SET instructions = CASE
-                   WHEN instructions IS NULL OR trim(instructions) = '' THEN ?
-                   ELSE instructions || char(10) || char(10) || ?
-                 END
-                 WHERE id = ? AND state = 'queued'`,
-              )
-              .run(normalizedInstructions, normalizedInstructions, active.id);
-            this.insertTicketEvent({
-              ticketId,
-              eventType: "investigation_queue_updated",
-              actor,
-              fromStatus: null,
-              toStatus: null,
-              data: {
-                jobId: active.id,
-                trigger,
-                instructions: normalizedInstructions,
-              },
-              occurredAt: timestamp,
-            });
-          }
-          return active;
-        }
-
-        const hasInstruction = includesInvestigationInstruction(
-          active.rerun_instructions,
-          normalizedInstructions,
-        );
-        if (active.rerun_requested && hasInstruction) return active;
-
-        this.database
-          .prepare(
-            `UPDATE investigation_jobs
-             SET rerun_requested = 1,
-                 rerun_instructions = CASE
-                   WHEN ? IS NULL THEN rerun_instructions
-                   WHEN rerun_instructions IS NULL OR trim(rerun_instructions) = '' THEN ?
-                   ELSE rerun_instructions || char(10) || char(10) || ?
-                 END
-             WHERE id = ? AND state = 'running'`,
-          )
-          .run(
-            normalizedInstructions,
-            normalizedInstructions,
-            normalizedInstructions,
-            active.id,
-          );
-        this.insertTicketEvent({
-          ticketId,
-          eventType: "investigation_rerun_requested",
-          actor: "system",
-          fromStatus: null,
-          toStatus: null,
-          data: {
-            activeJobId: active.id,
-            trigger,
-            instructions: normalizedInstructions,
-          },
-          occurredAt: timestamp,
-        });
-        return active;
-      }
-
-      const id = randomUUID();
-      this.database
-        .prepare(
-          `INSERT INTO investigation_jobs
-            (id, ticket_id, state, instructions, requested_at)
-           VALUES (?, ?, 'queued', ?, ?)`,
-        )
-        .run(id, ticketId, normalizedInstructions, timestamp);
-      this.insertTicketEvent({
-        ticketId,
-        eventType: "investigation_queued",
-        actor,
-        fromStatus: null,
-        toStatus: null,
-        data: { jobId: id, trigger, instructions: normalizedInstructions },
-        occurredAt: timestamp,
-      });
-      return { id, state: "queued" as const };
-    })();
-
-    return { accepted: true, ticketId, jobId: job.id, state: "queued" };
-  }
-
-  markInvestigationRunning(jobId: string): void {
-    this.database.transaction(() => {
-      const timestamp = nowUtc();
-      const job = this.database
-        .prepare(
-          `UPDATE investigation_jobs
-           SET state = 'running', started_at = ?, error = NULL,
-               attempt_count = attempt_count + 1,
-               instructions = CASE
-                 WHEN rerun_instructions IS NULL OR trim(rerun_instructions) = '' THEN instructions
-                 WHEN instructions IS NULL OR trim(instructions) = '' THEN rerun_instructions
-                 ELSE instructions || char(10) || char(10) || rerun_instructions
-               END,
-               rerun_requested = 0, rerun_instructions = NULL
-           WHERE id = ? AND state = 'queued'
-           RETURNING ticket_id, attempt_count`,
-        )
-        .get(timestamp, jobId) as
-        | { ticket_id: string; attempt_count: number }
-        | undefined;
-      if (!job) {
-        const existing = this.database
-          .prepare("SELECT id, state FROM investigation_jobs WHERE id = ?")
-          .get(jobId) as { id: string; state: string } | undefined;
-        if (!existing) {
-          throw new NotFoundError("Job de investigação", jobId);
-        }
-        throw new ValidationError(
-          `Job não pode iniciar a partir do estado ${existing.state}`,
-        );
-      }
-      this.insertTicketEvent({
-        ticketId: job.ticket_id,
-        eventType: "investigation_started",
-        actor: "Agente de IA",
-        fromStatus: null,
-        toStatus: null,
-        data: { jobId, jobKind: "automatic", attempt: job.attempt_count },
-        occurredAt: timestamp,
-      });
-    })();
-  }
-
-  claimNextInvestigationJob(leaseMs = 10 * 60_000): ClaimedInvestigationJob | null {
-    if (!Number.isFinite(leaseMs) || leaseMs < 1_000) {
-      throw new ValidationError("Lease do job deve ser de pelo menos 1000ms");
-    }
-    const claimedAt = nowUtc();
-    const leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
-    return this.database.transaction(() => {
-      const row = this.database.prepare(
-        `UPDATE investigation_jobs
-         SET state = 'running',
-             started_at = COALESCE(started_at, ?),
-             claimed_at = ?,
-             lease_expires_at = ?,
-             attempt_count = attempt_count + 1,
-             error = NULL,
-             instructions = CASE
-               WHEN rerun_instructions IS NULL OR trim(rerun_instructions) = '' THEN instructions
-               WHEN instructions IS NULL OR trim(instructions) = '' THEN rerun_instructions
-               ELSE instructions || char(10) || char(10) || rerun_instructions
-             END,
-             rerun_requested = 0, rerun_instructions = NULL
-         WHERE id = (
-           SELECT j.id
-           FROM investigation_jobs j
-           JOIN tickets t ON t.id = j.ticket_id
-           JOIN clients c ON c.id = t.client_id
-           WHERE c.ignored_at IS NULL
-             AND t.status NOT IN ('resolved', 'cancelled', 'archived')
-             AND (
-               j.state = 'queued'
-               OR (j.state = 'running' AND j.lease_expires_at IS NOT NULL AND j.lease_expires_at <= ?)
-             )
-           ORDER BY CASE j.state WHEN 'running' THEN 0 ELSE 1 END, j.requested_at
-           LIMIT 1
-         )
-         RETURNING id, ticket_id, instructions, attempt_count`,
-      ).get(claimedAt, claimedAt, leaseExpiresAt, claimedAt) as
-        | {
-            id: string;
-            ticket_id: string;
-            instructions: string | null;
-            attempt_count: number;
-          }
-        | undefined;
-      if (!row) return null;
-      this.insertTicketEvent({
-        ticketId: row.ticket_id,
-        eventType: "investigation_started",
-        actor: "Agente de IA",
-        fromStatus: null,
-        toStatus: null,
-        data: { jobId: row.id, jobKind: "automatic", attempt: row.attempt_count },
-        occurredAt: claimedAt,
-      });
-      return { id: row.id, ticketId: row.ticket_id, instructions: row.instructions };
-    })();
-  }
-
-  recoverRunningInvestigationJobs(): number {
-    const result = this.database
-      .prepare(
-        `UPDATE investigation_jobs
-         SET state = 'queued', claimed_at = NULL, lease_expires_at = NULL,
-             error = 'Recuperado após reinício do worker',
-             instructions = CASE
-               WHEN rerun_instructions IS NULL OR trim(rerun_instructions) = '' THEN instructions
-               WHEN instructions IS NULL OR trim(instructions) = '' THEN rerun_instructions
-               ELSE instructions || char(10) || char(10) || rerun_instructions
-             END,
-             rerun_requested = 0, rerun_instructions = NULL
-         WHERE state = 'running'`,
-      )
-      .run();
-    return result.changes;
-  }
-
-  claimNextAgentJob(leaseMs = 10 * 60_000): ClaimedAgentJob | null {
-    if (!Number.isFinite(leaseMs) || leaseMs < 1_000) {
-      throw new ValidationError("Lease do job deve ser de pelo menos 1000ms");
-    }
-    const claimedAt = nowUtc();
-    const leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
-
-    return this.database.transaction(() => {
-      const candidate = this.database
-        .prepare(
-          `SELECT kind, id
-           FROM (
-             SELECT 'thread_turn' AS kind, j.id, j.state, j.requested_at,
-                    j.lease_expires_at, 0 AS queue_priority
-             FROM investigation_thread_jobs j
-             JOIN investigation_threads thread ON thread.id = j.thread_id
-             LEFT JOIN tickets t ON t.id = thread.ticket_id
-             LEFT JOIN clients c ON c.id = t.client_id
-             WHERE (thread.ticket_id IS NULL OR c.ignored_at IS NULL)
-               AND (
-                 j.state = 'queued'
-                 OR (j.state = 'running' AND j.lease_expires_at IS NOT NULL AND j.lease_expires_at <= ?)
-               )
-             UNION ALL
-             SELECT 'triage' AS kind, job.id, job.state, job.requested_at,
-                    job.lease_expires_at, 2 AS queue_priority
-             FROM triage_ai_jobs job
-             JOIN whatsapp_groups conversation ON conversation.id = job.group_id
-             JOIN clients client ON client.id = conversation.client_id
-             JOIN triage_ai_settings settings
-               ON settings.singleton = 1 AND settings.enabled = 1
-             WHERE client.ignored_at IS NULL
-               AND conversation.suggestions_muted_at IS NULL
-               AND (
-                 job.state = 'queued'
-                 OR (job.state = 'running' AND job.lease_expires_at IS NOT NULL AND job.lease_expires_at <= ?)
-               )
-             UNION ALL
-             SELECT 'documentation' AS kind, job.id, job.state, job.requested_at,
-                    job.lease_expires_at, 1 AS queue_priority
-             FROM documentation_generation_jobs job
-             JOIN documentation_drafts draft ON draft.id = job.draft_id
-             JOIN tickets ticket ON ticket.id = draft.ticket_id
-             WHERE (
-                 job.state = 'queued'
-                 OR (job.state = 'running' AND job.lease_expires_at IS NOT NULL AND job.lease_expires_at <= ?)
-               )
-           )
-           ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END,
-                    queue_priority, requested_at, id
-           LIMIT 1`,
-        )
-        .get(claimedAt, claimedAt, claimedAt) as
-        | { kind: "thread_turn" | "triage" | "documentation"; id: string }
-        | undefined;
-      if (!candidate) return null;
-
-      if (candidate.kind === "triage") {
-        const row = this.database
-          .prepare(
-            `UPDATE triage_ai_jobs
-             SET state = 'running', started_at = COALESCE(started_at, ?),
-                 claimed_at = ?, lease_expires_at = ?,
-                 attempt_count = attempt_count + 1, error = NULL,
-                 updated_at = ?
-             WHERE id = ?
-               AND (state = 'queued'
-                 OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))
-             RETURNING id, group_id, model, attempt_count`,
-          )
-          .get(
-            claimedAt,
-            claimedAt,
-            leaseExpiresAt,
-            claimedAt,
-            candidate.id,
-            claimedAt,
-          ) as
-          | {
-              id: string;
-              group_id: string;
-              model: string;
-              attempt_count: number;
-            }
-          | undefined;
-        if (!row) return null;
-        return {
-          kind: "triage" as const,
-          id: row.id,
-          groupId: row.group_id,
-          model: row.model,
-          attemptCount: row.attempt_count,
-        };
-      }
-
-      if (candidate.kind === "documentation") {
-        const row = this.database
-          .prepare(
-            `UPDATE documentation_generation_jobs
-             SET state = 'running', started_at = COALESCE(started_at, ?),
-                 claimed_at = ?, lease_expires_at = ?,
-                 attempt_count = attempt_count + 1, error = NULL
-             WHERE id = ?
-               AND (state = 'queued'
-                 OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))
-             RETURNING id, draft_id, attempt_count, phase,
-               (SELECT ticket_id FROM documentation_drafts WHERE id = draft_id) AS ticket_id`,
-          )
-          .get(claimedAt, claimedAt, leaseExpiresAt, candidate.id, claimedAt) as
-          | { id: string; draft_id: string; ticket_id: string; attempt_count: number; phase: "extraction" | "document" }
-          | undefined;
-        if (!row) return null;
-        return {
-          kind: "documentation" as const,
-          id: row.id,
-          draftId: row.draft_id,
-          ticketId: row.ticket_id,
-          attemptCount: row.attempt_count,
-          phase: row.phase,
-        };
-      }
-
-      const row = this.database
-        .prepare(
-          `UPDATE investigation_thread_jobs
-           SET state = 'running', started_at = COALESCE(started_at, ?),
-               claimed_at = ?, lease_expires_at = ?,
-               attempt_count = attempt_count + 1, error = NULL
-           WHERE id = ?
-             AND (state = 'queued'
-               OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))
-           RETURNING id, thread_id, operator_message_id, attempt_count,
-             (SELECT ticket_id FROM investigation_threads WHERE id = thread_id) AS ticket_id`,
-        )
-        .get(
-          claimedAt,
-          claimedAt,
-          leaseExpiresAt,
-          candidate.id,
-          claimedAt,
-        ) as
-        | {
-            id: string;
-            thread_id: string;
-            ticket_id: string | null;
-            operator_message_id: string;
-            attempt_count: number;
-          }
-        | undefined;
-      if (!row) return null;
-      if (row.ticket_id) {
-        this.insertTicketEvent({
-          ticketId: row.ticket_id,
-          eventType: "investigation_thread_turn_started",
-          actor: "Agente de IA",
-          fromStatus: null,
-          toStatus: null,
-          data: {
-            threadId: row.thread_id,
-            jobId: row.id,
-            operatorMessageId: row.operator_message_id,
-            jobKind: "thread_turn",
-            attempt: row.attempt_count,
-            mode: "readonly",
-            sourceScope: ["code", "postgres", "clickhouse", "aws"],
-          },
-          occurredAt: claimedAt,
-        });
-      }
-      return {
-        kind: "thread_turn" as const,
-        id: row.id,
-        threadId: row.thread_id,
-        ticketId: row.ticket_id,
-        operatorMessageId: row.operator_message_id,
-        attemptCount: row.attempt_count,
-      };
-    })();
-  }
-
-  renewAgentJobLease(job: ClaimedAgentJob, leaseMs = 10 * 60_000): boolean {
-    if (!Number.isFinite(leaseMs) || leaseMs < 1_000) {
-      throw new ValidationError("Lease do job deve ser de pelo menos 1000ms");
-    }
-    const table = job.kind === "thread_turn"
-      ? "investigation_thread_jobs"
-      : job.kind === "triage"
-        ? "triage_ai_jobs"
-        : job.kind === "documentation"
-          ? "documentation_generation_jobs"
-          : "investigation_jobs";
-    const leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
-    const result = this.database
-      .prepare(`UPDATE ${table} SET lease_expires_at = ? WHERE id = ? AND state = 'running'`)
-      .run(leaseExpiresAt, job.id);
-    return result.changes === 1;
-  }
-
-  recoverRunningAgentJobs(): number {
-    return this.database.transaction(() => {
-      const retiredAutomatic = this.database
-        .prepare(
-          `UPDATE investigation_jobs
-           SET state = 'failed', finished_at = ?,
-               error = 'Investigação automática removida do Threadmark',
-               claimed_at = NULL, lease_expires_at = NULL,
-               rerun_requested = 0, rerun_instructions = NULL
-           WHERE state IN ('queued', 'running')`,
-        )
-        .run(nowUtc()).changes;
-      const conversational = this.database
-        .prepare(
-          `UPDATE investigation_thread_jobs
-           SET state = 'queued', claimed_at = NULL, lease_expires_at = NULL,
-               error = 'Recuperado após reinício do worker'
-           WHERE state = 'running'`,
-        )
-        .run().changes;
-      const triage = this.recoverRunningTriageAiJobs();
-      const documentation = this.database
-        .prepare(
-          `UPDATE documentation_generation_jobs
-           SET state = 'queued', claimed_at = NULL, lease_expires_at = NULL,
-               error = 'Recuperado após reinício do worker'
-           WHERE state = 'running'`,
-        )
-        .run().changes;
-      return retiredAutomatic + conversational + triage + documentation;
-    })();
-  }
-
-  getOrCreateInvestigationThread(ticketId: string): InvestigationThreadDto {
-    this.assertEntityExists("Ticket", "tickets", ticketId);
-    return this.database.transaction(() => {
-      const timestamp = nowUtc();
-      const id = randomUUID();
-      const inserted = this.database
-        .prepare(
-          `INSERT OR IGNORE INTO investigation_threads
-            (id, ticket_id, status, summary, created_at, updated_at)
-           VALUES (?, ?, 'active', '', ?, ?)`,
-        )
-        .run(id, ticketId, timestamp, timestamp);
-      const row = this.database
-        .prepare("SELECT id FROM investigation_threads WHERE ticket_id = ?")
-        .get(ticketId) as EntityRecord | undefined;
-      if (!row) {
-        throw new Error("Não foi possível localizar ou criar a conversa do Threadmark AI");
-      }
-      if (inserted.changes > 0) {
-        this.insertTicketEvent({
-          ticketId,
-          eventType: "investigation_thread_created",
-          actor: "Operador local",
-          fromStatus: null,
-          toStatus: null,
-          data: { threadId: row.id },
-          occurredAt: timestamp,
-        });
-      }
-      return this.getInvestigationThread(row.id);
-    })();
-  }
-
-  getInvestigationThread(threadId: string): InvestigationThreadDto {
-    const row = this.database
-      .prepare(
-        `SELECT id, ticket_id, scope, title, context_json, status, summary,
-                created_at, updated_at, last_viewed_at
-         FROM investigation_threads WHERE id = ?`,
-      )
-      .get(threadId) as
-      | {
-          id: string;
-          ticket_id: string | null;
-          scope: "ticket" | "workspace";
-          title: string;
-          context_json: string;
-          status: InvestigationThreadDto["status"];
-          summary: string;
-          created_at: string;
-          updated_at: string;
-          last_viewed_at: string | null;
-        }
-      | undefined;
-    if (!row) {
-      throw new NotFoundError("Conversa do Threadmark AI", threadId);
-    }
-
-    const messages = this.getInvestigationThreadMessages(threadId);
-    const turns = this.getInvestigationThreadTurns(threadId);
-    const activeTurn = turns.find(
-      (turn) => turn.state === "queued" || turn.state === "running",
-    );
-    const lastAssistantMessageAt = messages.reduce<string | null>(
-      (latest, message) =>
-        message.role === "assistant" &&
-        (!latest || message.createdAt > latest)
-          ? message.createdAt
-          : latest,
-      null,
-    );
-    return {
-      id: row.id,
-      ticketId: row.ticket_id,
-      scope: row.scope,
-      title: row.title,
-      context: parseThreadmarkAiContext(row.context_json),
-      status: row.status,
-      summary: row.summary,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      lastAssistantMessageAt,
-      unread: Boolean(
-        row.scope === "workspace" &&
-        lastAssistantMessageAt &&
-        (!row.last_viewed_at || lastAssistantMessageAt > row.last_viewed_at)
-      ),
-      activeTurnState: activeTurn?.state ?? null,
-      messages,
-      turns,
-    };
-  }
-
-  listThreadmarkAiThreads(
-    ownerUserId: string | null = null,
-  ): ThreadmarkAiThreadListResponse {
-    const ownerFilter = ownerUserId
-      ? "AND thread.created_by_user_id = ?"
-      : "";
-    const rows = this.database
-      .prepare(
-        `SELECT thread.id, thread.title, thread.status, thread.updated_at,
-                thread.last_viewed_at,
-                (SELECT MAX(message.created_at)
-                 FROM investigation_thread_messages message
-                 WHERE message.thread_id = thread.id
-                   AND message.role = 'assistant') AS last_assistant_message_at,
-                (SELECT job.state
-                 FROM investigation_thread_jobs job
-                 WHERE job.thread_id = thread.id
-                   AND job.state IN ('queued', 'running')
-                 ORDER BY job.requested_at DESC, job.rowid DESC LIMIT 1) AS active_turn_state
-         FROM investigation_threads thread
-         WHERE thread.scope = 'workspace'
-         ${ownerFilter}
-         ORDER BY thread.updated_at DESC, thread.id DESC`,
-      )
-      .all(...(ownerUserId ? [ownerUserId] : [])) as Array<{
-      id: string;
-      title: string;
-      status: InvestigationThreadDto["status"];
-      updated_at: string;
-      last_viewed_at: string | null;
-      last_assistant_message_at: string | null;
-      active_turn_state: InvestigationJobState | null;
-    }>;
-    return {
-      items: rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        status: row.status,
-        updatedAt: row.updated_at,
-        lastAssistantMessageAt: row.last_assistant_message_at,
-        unread: Boolean(
-          row.last_assistant_message_at &&
-          (!row.last_viewed_at || row.last_assistant_message_at > row.last_viewed_at)
-        ),
-        activeTurnState: row.active_turn_state,
-      })),
-    };
-  }
-
-  createThreadmarkAiThread(
-    input: CreateThreadmarkAiThreadInput = {},
-    actor = "Operador local",
-    ownerUserId: string | null = null,
-  ): ThreadmarkAiThreadDto {
-    const timestamp = nowUtc();
-    const id = randomUUID();
-    const title = normalizedNullableText(input.title)?.slice(0, 160) || "Nova conversa";
-    const context = normalizeThreadmarkAiContext(input.context);
-    this.database
-      .prepare(
-        `INSERT INTO investigation_threads
-          (id, ticket_id, scope, title, context_json, created_by,
-           created_by_user_id, status, summary, created_at, updated_at,
-           last_viewed_at)
-         VALUES (?, NULL, 'workspace', ?, ?, ?, ?, 'active', '', ?, ?, ?)`,
-      )
-      .run(
-        id,
-        title,
-        JSON.stringify(context ?? {}),
-        normalizedText(actor, "Responsável").slice(0, 200),
-        ownerUserId,
-        timestamp,
-        timestamp,
-        timestamp,
-      );
-    return this.getThreadmarkAiThread(id, ownerUserId);
-  }
-
-  getOrCreateThreadmarkAiThread(
-    actor = "Operador local",
-    context: ThreadmarkAiContextDto | null = null,
-    ownerUserId: string | null = null,
-  ): ThreadmarkAiThreadDto {
-    const ownerFilter = ownerUserId ? "AND created_by_user_id = ?" : "";
-    const active = this.database
-      .prepare(
-        `SELECT id FROM investigation_threads
-         WHERE scope = 'workspace'
-         ${ownerFilter}
-         ORDER BY updated_at DESC, id DESC LIMIT 1`,
-      )
-      .get(...(ownerUserId ? [ownerUserId] : [])) as EntityRecord | undefined;
-    return active
-      ? this.getThreadmarkAiThread(active.id, ownerUserId)
-      : this.createThreadmarkAiThread({ context }, actor, ownerUserId);
-  }
-
-  getThreadmarkAiThread(
-    threadId: string,
-    ownerUserId: string | null = null,
-  ): ThreadmarkAiThreadDto {
-    if (ownerUserId) {
-      const owned = this.database
-        .prepare(
-          `SELECT id FROM investigation_threads
-           WHERE id = ? AND scope = 'workspace' AND created_by_user_id = ?`,
-        )
-        .get(threadId, ownerUserId);
-      if (!owned) {
-        throw new NotFoundError("Conversa do Threadmark AI", threadId);
-      }
-    }
-    const thread = this.getInvestigationThread(threadId);
-    if (thread.scope !== "workspace" || thread.ticketId !== null) {
-      throw new NotFoundError("Conversa do Threadmark AI", threadId);
-    }
-    return {
-      ...thread,
-      scope: "workspace",
-      ticketId: null,
-      title: thread.title || "Nova conversa",
-      unread: thread.unread === true,
-      context: thread.context ?? null,
-    };
-  }
-
-  markThreadmarkAiThreadRead(
-    threadId: string,
-    ownerUserId: string | null = null,
-  ): ThreadmarkAiThreadDto {
-    return this.database.transaction(() => {
-      this.getThreadmarkAiThread(threadId, ownerUserId);
-      this.database
-        .prepare(
-          `UPDATE investigation_threads
-           SET last_viewed_at = ?
-           WHERE id = ? AND scope = 'workspace'`,
-        )
-        .run(nowUtc(), threadId);
-      return this.getThreadmarkAiThread(threadId, ownerUserId);
-    })();
-  }
-
-  deleteThreadmarkAiThread(
-    threadId: string,
-    ownerUserId: string | null = null,
-  ): DeletedThreadmarkAiThread {
-    return this.database.transaction(() => {
-      const thread = this.getThreadmarkAiThread(threadId, ownerUserId);
-      if (
-        thread.activeTurnState === "queued" ||
-        thread.activeTurnState === "running"
-      ) {
-        throw new ConflictError(
-          "Interrompa a execução atual antes de excluir esta conversa.",
-          { threadId, activeTurnState: thread.activeTurnState },
-        );
-      }
-      const attachments = this.database
-        .prepare(
-          `SELECT attachment.local_path
-           FROM investigation_thread_message_attachments attachment
-           JOIN investigation_thread_messages message
-             ON message.id = attachment.message_id
-           WHERE message.thread_id = ?`,
-        )
-        .all(threadId) as Array<{ local_path: string }>;
-      const deleted = this.database
-        .prepare(
-          `DELETE FROM investigation_threads
-           WHERE id = ? AND scope = 'workspace'`,
-        )
-        .run(threadId);
-      if (deleted.changes !== 1) {
-        throw new NotFoundError("Conversa do Threadmark AI", threadId);
-      }
-      return {
-        id: threadId,
-        deleted: true as const,
-        attachmentPaths: attachments.map((attachment) => attachment.local_path),
-      };
-    })();
-  }
-
-  cancelInvestigationThread(
-    threadId: string,
-    actor = "Operador local",
-  ): CancelInvestigationThreadResult {
-    const cancelledBy = normalizedText(actor, "Responsável").slice(0, 200);
-
-    return this.database.transaction(() => {
-      const thread = this.database
-        .prepare("SELECT ticket_id FROM investigation_threads WHERE id = ?")
-        .get(threadId) as { ticket_id: string | null } | undefined;
-      if (!thread) {
-        throw new NotFoundError("Conversa do Threadmark AI", threadId);
-      }
-
-      const active = this.database
-        .prepare(
-          `SELECT id, state
-           FROM investigation_thread_jobs
-           WHERE thread_id = ? AND state IN ('queued', 'running')
-           ORDER BY requested_at DESC, rowid DESC
-           LIMIT 1`,
-        )
-        .get(threadId) as
-        | { id: string; state: "queued" | "running" }
-        | undefined;
-
-      if (!active) {
-        const latestTurn = this.database
-          .prepare(
-            `SELECT id, cancelled_at FROM investigation_thread_jobs
-             WHERE thread_id = ?
-             ORDER BY requested_at DESC, rowid DESC LIMIT 1`,
-          )
-          .get(threadId) as
-          | { id: string; cancelled_at: string | null }
-          | undefined;
-        return {
-          thread: this.getInvestigationThread(threadId),
-          cancelledJobId: latestTurn?.cancelled_at ? latestTurn.id : null,
-          newlyCancelled: false,
-        };
-      }
-
-      const timestamp = nowUtc();
-      const cancelled = this.database
-        .prepare(
-          `UPDATE investigation_thread_jobs
-           SET state = 'failed', cancelled_at = ?, cancelled_by = ?,
-               finished_at = ?, error = NULL, claimed_at = NULL,
-               lease_expires_at = NULL
-           WHERE id = ? AND state IN ('queued', 'running')
-             AND cancelled_at IS NULL`,
-        )
-        .run(timestamp, cancelledBy, timestamp, active.id);
-
-      if (!cancelled.changes) {
-        return {
-          thread: this.getInvestigationThread(threadId),
-          cancelledJobId: null,
-          newlyCancelled: false,
-        };
-      }
-
-      this.database
-        .prepare(
-          `UPDATE investigation_threads
-           SET status = 'active', updated_at = ? WHERE id = ?`,
-        )
-        .run(timestamp, threadId);
-      if (thread.ticket_id) {
-        this.insertTicketEvent({
-          ticketId: thread.ticket_id,
-          eventType: "investigation_thread_turn_cancelled",
-          actor: cancelledBy,
-          fromStatus: null,
-          toStatus: null,
-          data: {
-            threadId,
-            jobId: active.id,
-            jobKind: "thread_turn",
-            previousState: active.state,
-          },
-          occurredAt: timestamp,
-        });
-      }
-
-      return {
-        thread: this.getInvestigationThread(threadId),
-        cancelledJobId: active.id,
-        newlyCancelled: true,
-      };
-    })();
-  }
-
-  isInvestigationThreadJobCancelled(jobId: string): boolean {
-    const row = this.database
-      .prepare(
-        `SELECT cancelled_at FROM investigation_thread_jobs WHERE id = ?`,
-      )
-      .get(jobId) as { cancelled_at: string | null } | undefined;
-    return Boolean(row?.cancelled_at);
-  }
-
-  addInvestigationThreadMessage(
-    threadId: string,
-    input: AddInvestigationThreadMessageInput,
-    attachments: readonly InvestigationThreadImageInput[] = [],
-    imageAnalysisApproved = false,
-    messageActor: InvestigationMessageActor | null = null,
-  ): InvestigationThreadDto {
-    const body = normalizedText(input.body, "Mensagem");
-    if (body.length > INVESTIGATION_THREAD_MESSAGE_MAX_LENGTH) {
-      throw new ValidationError(
-        `Mensagem deve ter no máximo ${INVESTIGATION_THREAD_MESSAGE_MAX_LENGTH} caracteres`,
-      );
-    }
-    const clientMessageId = normalizedNullableText(input.clientMessageId)?.slice(
-      0,
-      200,
-    );
-    const messageContext = normalizeThreadmarkAiContext(input.context);
-
-    return this.database.transaction(() => {
-      const thread = this.database
-        .prepare("SELECT id, ticket_id, scope, title FROM investigation_threads WHERE id = ?")
-        .get(threadId) as {
-          id: string;
-          ticket_id: string | null;
-          scope: "ticket" | "workspace";
-          title: string;
-        } | undefined;
-      if (!thread) {
-        throw new NotFoundError("Conversa do Threadmark AI", threadId);
-      }
-
-      if (clientMessageId) {
-        const duplicate = this.database
-          .prepare(
-            `SELECT id FROM investigation_thread_messages
-             WHERE thread_id = ? AND client_message_id = ?`,
-          )
-          .get(threadId, clientMessageId);
-        if (duplicate) return this.getInvestigationThread(threadId);
-      }
-
-      const active = this.database
-        .prepare(
-          `SELECT id FROM investigation_thread_jobs
-           WHERE thread_id = ? AND state IN ('queued', 'running') LIMIT 1`,
-        )
-        .get(threadId) as EntityRecord | undefined;
-      if (active) {
-        throw new ConflictError(
-          "Aguarde a conclusão da mensagem anterior antes de enviar outra.",
-          { threadId, activeJobId: active.id },
-        );
-      }
-
-      const timestamp = nowUtc();
-      const messageId = randomUUID();
-      const jobId = randomUUID();
-      this.database
-        .prepare(
-          `INSERT INTO investigation_thread_messages
-            (id, thread_id, role, body, context_json, client_message_id,
-             actor_user_id, actor_role, created_at)
-           VALUES (?, ?, 'operator', ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          messageId,
-          threadId,
-          body,
-          JSON.stringify(messageContext ?? {}),
-          clientMessageId,
-          messageActor?.userId ?? null,
-          messageActor?.role ?? null,
-          timestamp,
-        );
-      const insertAttachment = this.database.prepare(
-        `INSERT INTO investigation_thread_message_attachments (
-           id, message_id, kind, mime_type, file_name, local_path,
-           size_bytes, sha256, ai_analysis_approved, created_at
-         ) VALUES (?, ?, 'image', ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      for (const attachment of attachments) {
-        insertAttachment.run(
-          attachment.id,
-          messageId,
-          attachment.mimeType,
-          attachment.fileName,
-          attachment.localPath,
-          attachment.sizeBytes,
-          attachment.sha256,
-          imageAnalysisApproved ? 1 : 0,
-          timestamp,
-        );
-      }
-      this.database
-        .prepare(
-          `INSERT INTO investigation_thread_jobs
-            (id, thread_id, operator_message_id, state, requested_at)
-           VALUES (?, ?, ?, 'queued', ?)`,
-        )
-        .run(jobId, threadId, messageId, timestamp);
-      this.database
-        .prepare(
-          `UPDATE investigation_threads
-           SET status = 'active',
-               context_json = CASE WHEN ? = '{}' THEN context_json ELSE ? END,
-               title = CASE
-                 WHEN scope = 'workspace' AND title = 'Nova conversa'
-                   THEN substr(?, 1, 80)
-                 ELSE title
-               END,
-               updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          JSON.stringify(messageContext ?? {}),
-          JSON.stringify(messageContext ?? {}),
-          body.replace(/\s+/g, " ").trim(),
-          timestamp,
-          threadId,
-        );
-      if (thread.ticket_id) {
-        this.insertTicketEvent({
-          ticketId: thread.ticket_id,
-          eventType: "investigation_thread_message_queued",
-          actor: "Operador local",
-          fromStatus: null,
-          toStatus: null,
-          data: { threadId, messageId, jobId },
-          occurredAt: timestamp,
-        });
-      }
-      return this.getInvestigationThread(threadId);
-    })();
-  }
-
-  addThreadmarkAiMessage(
-    threadId: string,
-    input: AddInvestigationThreadMessageInput,
-    attachments: readonly InvestigationThreadImageInput[] = [],
-    imageAnalysisApproved = false,
-    messageActor: InvestigationMessageActor | null = null,
-  ): ThreadmarkAiThreadDto {
-    const thread = this.getThreadmarkAiThread(threadId);
-    this.addInvestigationThreadMessage(
-      thread.id,
-      input,
-      attachments,
-      imageAnalysisApproved,
-      messageActor,
-    );
-    return this.getThreadmarkAiThread(thread.id);
-  }
-
-  hasInvestigationThreadClientMessage(
-    threadId: string,
-    clientMessageId: string,
-  ): boolean {
-    return Boolean(
-      this.database
-        .prepare(
-          `SELECT 1 FROM investigation_thread_messages
-           WHERE thread_id = ? AND client_message_id = ?`,
-        )
-        .get(threadId, clientMessageId),
-    );
-  }
-
-  private getSupportConversationState(
-    ticketId: string,
-  ): SupportAnalysisInput["conversationState"] {
-    const external = this.database
-      .prepare(
-        `SELECT MAX(message.occurred_at) AS last_external_message_at
-         FROM ticket_messages ticket_message
-         JOIN messages message ON message.id = ticket_message.message_id
-         LEFT JOIN staff_members staff
-           ON staff.participant_id = message.sender_id AND staff.active = 1
-         WHERE ticket_message.ticket_id = ?
-           AND staff.participant_id IS NULL`,
-      )
-      .get(ticketId) as {
-      last_external_message_at: string | null;
-    };
-    const latestResponse = this.database
-      .prepare(
-        `WITH response_moments AS (
-           SELECT response.sent_at, message.rowid AS message_rowid,
-                  response.rowid AS response_rowid
-           FROM sent_responses response
-           LEFT JOIN messages message ON message.id = response.message_id
-           WHERE response.ticket_id = ?
-
-           UNION ALL
-
-           SELECT message.occurred_at AS sent_at,
-                  message.rowid AS message_rowid,
-                  0 AS response_rowid
-           FROM ticket_messages ticket_message
-           JOIN messages message ON message.id = ticket_message.message_id
-           JOIN staff_members staff
-             ON staff.participant_id = message.sender_id AND staff.active = 1
-           WHERE ticket_message.ticket_id = ?
-             AND (
-               (message.text IS NOT NULL AND trim(message.text) <> '')
-               OR EXISTS (
-                 SELECT 1 FROM attachments attachment
-                 WHERE attachment.message_id = message.id
-                   AND attachment.available = 1
-               )
-             )
-             AND NOT EXISTS (
-               SELECT 1 FROM sent_responses response
-               WHERE response.ticket_id = ticket_message.ticket_id
-                 AND response.message_id = message.id
-             )
-         )
-         SELECT sent_at, message_rowid
-         FROM response_moments
-         ORDER BY sent_at DESC,
-                  CASE WHEN message_rowid IS NULL THEN 0 ELSE 1 END,
-                  message_rowid DESC,
-                  response_rowid DESC
-         LIMIT 1`,
-      )
-      .get(ticketId, ticketId) as
-      | {
-          sent_at: string;
-          message_rowid: number | null;
-        }
-      | undefined;
-    const timestamps = {
-      last_external_message_at: external.last_external_message_at,
-      last_sent_response_at: latestResponse?.sent_at ?? null,
-      last_sent_message_rowid: latestResponse?.message_rowid ?? null,
-    };
-    const unansweredExternalMessageIds = (
-      this.database
-        .prepare(
-          `SELECT message.id
-           FROM ticket_messages ticket_message
-           JOIN messages message ON message.id = ticket_message.message_id
-           LEFT JOIN staff_members staff
-             ON staff.participant_id = message.sender_id AND staff.active = 1
-           WHERE ticket_message.ticket_id = ?
-             AND staff.participant_id IS NULL
-             AND (
-               ? IS NULL
-               OR message.occurred_at > ?
-               OR (
-                 message.occurred_at = ?
-                 AND (
-                   ? IS NULL
-                   OR message.rowid > ?
-                 )
-               )
-             )
-           ORDER BY message.occurred_at DESC, message.rowid DESC
-           LIMIT ?`,
-        )
-        .all(
-          ticketId,
-          timestamps.last_sent_response_at,
-          timestamps.last_sent_response_at,
-          timestamps.last_sent_response_at,
-          timestamps.last_sent_message_rowid,
-          timestamps.last_sent_message_rowid,
-          THREAD_PROMPT_TICKET_MESSAGE_LIMIT,
-        ) as Array<{ id: string }>
-    ).toReversed().map((row) => row.id);
-
-    return {
-      lastExternalMessageAt: timestamps.last_external_message_at,
-      lastSentResponseAt: timestamps.last_sent_response_at,
-      unansweredExternalMessageIds,
-      hasUnansweredExternalMessages: unansweredExternalMessageIds.length > 0,
-    };
-  }
-
-  private getSupportSentResponses(
-    ticketId: string,
-  ): SupportAnalysisInput["sentResponses"] {
-    const rows = this.database
-      .prepare(
-        `SELECT id, message_id, body, sent_at
-         FROM sent_responses
-         WHERE ticket_id = ?
-         ORDER BY sent_at DESC, rowid DESC
-         LIMIT ?`,
-      )
-      .all(ticketId, SUPPORT_PROMPT_SENT_RESPONSE_LIMIT) as Array<{
-      id: string;
-      message_id: string | null;
-      body: string;
-      sent_at: string;
-    }>;
-    return rows.toReversed().map((row) => ({
-      id: row.id,
-      messageId: row.message_id,
-      body: truncatePromptText(row.body, SUPPORT_PROMPT_MESSAGE_TEXT_LIMIT),
-      sentAt: row.sent_at,
-    }));
-  }
-
-  private getSupportResolvedPrecedents(
-    ticketId: string,
-    clientId: string,
-    affectedStoreId: string | null,
-  ): SupportAnalysisInput["resolvedPrecedents"] {
-    const rows = this.database
-      .prepare(
-        `SELECT ticket.id, ticket.title, ticket.summary, ticket.resolved_at,
-                ticket.affected_store_id, affected_store.name AS affected_store_name,
-                resolution.summary AS resolution_summary,
-                resolution.root_cause, resolution.outcome,
-                resolution.validated_at,
-                (SELECT response.body
-                   FROM sent_responses response
-                  WHERE response.ticket_id = ticket.id
-                  ORDER BY response.sent_at DESC, response.rowid DESC
-                  LIMIT 1) AS final_response,
-                (SELECT COUNT(*)
-                   FROM ticket_categories precedent_category
-                  WHERE precedent_category.ticket_id = ticket.id
-                    AND EXISTS (
-                      SELECT 1
-                      FROM ticket_categories current_category
-                      WHERE current_category.ticket_id = ?
-                        AND current_category.category_id = precedent_category.category_id
-                    )) AS shared_category_count
-         FROM tickets ticket
-         JOIN resolutions resolution ON resolution.ticket_id = ticket.id
-         LEFT JOIN client_stores affected_store
-           ON affected_store.id = ticket.affected_store_id
-         WHERE ticket.client_id = ?
-           AND ticket.id <> ?
-           AND ticket.status IN ('resolved', 'archived')
-           AND (
-             ? IS NULL
-             OR ticket.affected_store_id IS NULL
-             OR ticket.affected_store_id = ?
-           )
-         ORDER BY
-                  CASE
-                    WHEN ? IS NOT NULL AND ticket.affected_store_id = ? THEN 0
-                    WHEN ticket.affected_store_id IS NULL THEN 1
-                    ELSE 2
-                  END,
-                  shared_category_count DESC,
-                  COALESCE(ticket.resolved_at, resolution.validated_at) DESC,
-                  ticket.updated_at DESC,
-                  ticket.id
-         LIMIT ?`,
-      )
-      .all(
-        ticketId,
-        clientId,
-        ticketId,
-        affectedStoreId,
-        affectedStoreId,
-        affectedStoreId,
-        affectedStoreId,
-        SUPPORT_PROMPT_RESOLVED_PRECEDENT_LIMIT,
-      ) as Array<{
-      id: string;
-      title: string;
-      summary: string;
-      resolved_at: string | null;
-      affected_store_id: string | null;
-      affected_store_name: string | null;
-      resolution_summary: string;
-      root_cause: string | null;
-      outcome: string | null;
-      validated_at: string;
-      final_response: string | null;
-      shared_category_count: number;
-    }>;
-    if (!rows.length) return [];
-
-    const categories = this.database.prepare(
-      `SELECT category.label
-       FROM ticket_categories ticket_category
-       JOIN categories category ON category.id = ticket_category.category_id
-       WHERE ticket_category.ticket_id = ?
-       ORDER BY category.facet, category.label`,
-    );
-    return rows.map((row) => ({
-      ticketId: row.id,
-      title: truncatePromptText(row.title, 500),
-      summary: truncatePromptText(row.summary, 2_000),
-      resolvedAt: row.resolved_at,
-      affectedStore: row.affected_store_id
-        ? {
-            id: row.affected_store_id,
-            name: row.affected_store_name as string,
-          }
-        : null,
-      categories: (categories.all(row.id) as Array<{ label: string }>).map(
-        (category) => category.label,
-      ),
-      resolution: {
-        summary: truncatePromptText(row.resolution_summary, 4_000),
-        rootCause: row.root_cause
-          ? truncatePromptText(row.root_cause, 4_000)
-          : null,
-        outcome: row.outcome ? truncatePromptText(row.outcome, 4_000) : null,
-        validatedAt: row.validated_at,
-      },
-      finalResponse: row.final_response
-        ? truncatePromptText(row.final_response, SUPPORT_PROMPT_MESSAGE_TEXT_LIMIT)
-        : null,
-    }));
-  }
-
   private supersedeCandidateSuggestions(
     ticketId: string,
     updatedAt: string,
@@ -9427,10 +7799,11 @@ export class SupportStore {
       .run(updatedAt, ticketId).changes;
   }
 
-  private invalidateLegacyAutomaticGuidance(
-    ticketId: string,
-    updatedAt: string,
-  ): void {
+  /**
+   * Ticket context changed materially. Candidate guidance is local operational
+   * state, not an embedded-agent runtime, and must not survive stale context.
+   */
+  private invalidateTicketGuidance(ticketId: string, updatedAt: string): void {
     this.supersedeCandidateSuggestions(ticketId, updatedAt);
     this.database
       .prepare(
@@ -9440,95 +7813,6 @@ export class SupportStore {
          WHERE id = ?`,
       )
       .run(updatedAt, updatedAt, ticketId);
-  }
-
-  private closeAutomaticInvestigationLifecycle(
-    ticketId: string,
-    finishedAt: string,
-    reason: string,
-  ): number {
-    this.supersedeCandidateSuggestions(ticketId, finishedAt);
-    const activeJobs = this.database
-      .prepare(
-        `SELECT id, state FROM investigation_jobs
-         WHERE ticket_id = ? AND state IN ('queued', 'running')
-         ORDER BY requested_at, rowid`,
-      )
-      .all(ticketId) as Array<{
-      id: string;
-      state: "queued" | "running";
-    }>;
-    if (!activeJobs.length) return 0;
-
-    this.database
-      .prepare(
-        `UPDATE investigation_jobs
-         SET state = 'failed', finished_at = ?, error = ?,
-             claimed_at = NULL, lease_expires_at = NULL,
-             rerun_requested = 0, rerun_instructions = NULL
-         WHERE ticket_id = ? AND state IN ('queued', 'running')`,
-      )
-      .run(finishedAt, reason, ticketId);
-    for (const job of activeJobs) {
-      this.insertTicketEvent({
-        ticketId,
-        eventType: "investigation_cancelled",
-        actor: "system",
-        fromStatus: null,
-        toStatus: null,
-        data: {
-          jobId: job.id,
-          jobKind: "automatic",
-          previousState: job.state,
-          reason,
-        },
-        occurredAt: finishedAt,
-      });
-    }
-    return activeJobs.length;
-  }
-
-  private investigationContextChangedSince(
-    ticketId: string,
-    sinceAt: string | null,
-  ): boolean {
-    if (!sinceAt) return false;
-    return Boolean(
-      this.database
-        .prepare(
-          `SELECT 1
-           WHERE EXISTS (
-             SELECT 1 FROM ticket_messages
-             WHERE ticket_id = ? AND added_at > ?
-           )
-           OR EXISTS (
-             SELECT 1 FROM sent_responses
-             WHERE ticket_id = ? AND captured_at > ?
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM ticket_messages tm
-             JOIN messages m ON m.id = tm.message_id
-             WHERE tm.ticket_id = ? AND m.updated_at > ?
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM ticket_messages tm
-             JOIN attachments a ON a.message_id = tm.message_id
-             WHERE tm.ticket_id = ? AND a.updated_at > ?
-           )`,
-        )
-        .get(
-          ticketId,
-          sinceAt,
-          ticketId,
-          sinceAt,
-          ticketId,
-          sinceAt,
-          ticketId,
-          sinceAt,
-        ),
-    );
   }
 
   private isSuggestedResponseAlreadySent(
@@ -9550,1864 +7834,6 @@ export class SupportStore {
     return responses.some((response) =>
       responsesAreEquivalent(candidate, response.body),
     );
-  }
-
-  private normalizeAutomaticReplyState(
-    ticketId: string,
-    analysis: SupportAnalysis,
-  ): SupportAnalysis {
-    const conversationState = this.getSupportConversationState(ticketId);
-    const lastExternalAt = conversationState.lastExternalMessageAt
-      ? Date.parse(conversationState.lastExternalMessageAt)
-      : Number.NaN;
-    const lastSentResponseAt = conversationState.lastSentResponseAt
-      ? Date.parse(conversationState.lastSentResponseAt)
-      : Number.NaN;
-    const hasCoherentSentResponse =
-      Number.isFinite(lastExternalAt) &&
-      Number.isFinite(lastSentResponseAt) &&
-      lastSentResponseAt >= lastExternalAt &&
-      !conversationState.hasUnansweredExternalMessages;
-    if (analysis.outcome === "already_answered" && !hasCoherentSentResponse) {
-      return {
-        ...analysis,
-        outcome: "technical_investigation_required",
-        suggestedResponse: null,
-        nextAction:
-          "Não há evidência temporal suficiente de que a demanda atual foi respondida. Reavalie o contexto antes de concluir o atendimento.",
-      };
-    }
-
-    const duplicate = analysis.suggestedResponse?.trim()
-      ? this.isSuggestedResponseAlreadySent(
-          ticketId,
-          analysis.suggestedResponse,
-        )
-      : false;
-    if (!duplicate) return analysis;
-    return {
-      ...analysis,
-      outcome: "technical_investigation_required",
-      suggestedResponse: null,
-      nextAction:
-        "A minuta repete uma resposta já enviada. Reavalie o contexto e produza orientação somente se houver informação materialmente nova.",
-    };
-  }
-
-  queueDocumentationDraft(ticketId: string, actor = "Operador local"): DocumentationDraftDto {
-    const ticket = this.database
-      .prepare("SELECT id, status FROM tickets WHERE id = ?")
-      .get(ticketId) as { id: string; status: TicketStatus } | undefined;
-    if (!ticket) throw new NotFoundError("Ticket", ticketId);
-    if (ticket.status !== "resolved" && ticket.status !== "archived") {
-      throw new ConflictError("A documentação só pode ser gerada a partir de um ticket resolvido.");
-    }
-    const resolution = this.database
-      .prepare("SELECT 1 FROM resolutions WHERE ticket_id = ? LIMIT 1")
-      .get(ticketId);
-    if (!resolution) {
-      throw new ConflictError("O ticket precisa ter um resumo de resolução antes de gerar a documentação.");
-    }
-
-    return this.database.transaction(() => {
-      const now = nowUtc();
-      const existingKnowledge = this.database
-        .prepare("SELECT id FROM knowledge_objects WHERE ticket_id = ?")
-        .get(ticketId) as { id: string } | undefined;
-      const knowledgeId = existingKnowledge?.id ?? randomUUID();
-      if (!existingKnowledge) {
-        this.database
-          .prepare(
-            `INSERT INTO knowledge_objects (
-               id, ticket_id, created_by, updated_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?)`,
-          )
-          .run(knowledgeId, ticketId, actor, actor, now, now);
-      }
-      const existing = this.database
-        .prepare("SELECT id FROM documentation_drafts WHERE ticket_id = ?")
-        .get(ticketId) as { id: string } | undefined;
-      const draftId = existing?.id ?? randomUUID();
-      if (!existing) {
-        this.database
-          .prepare(
-            `INSERT INTO documentation_drafts (
-               id, ticket_id, knowledge_id, status, created_by, updated_by, created_at, updated_at
-             ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?)`,
-          )
-          .run(draftId, ticketId, knowledgeId, actor, actor, now, now);
-      } else {
-        this.database
-          .prepare("UPDATE documentation_drafts SET knowledge_id = COALESCE(knowledge_id, ?) WHERE id = ?")
-          .run(knowledgeId, draftId);
-      }
-      const activeJob = this.database
-        .prepare(
-          `SELECT id FROM documentation_generation_jobs
-           WHERE draft_id = ? AND state IN ('queued', 'running') LIMIT 1`,
-        )
-        .get(draftId);
-      if (!activeJob) {
-        this.database
-          .prepare(
-            `INSERT INTO documentation_generation_jobs (
-               id, draft_id, phase, state, requested_by, requested_at
-             ) VALUES (?, ?, 'extraction', 'queued', ?, ?)`,
-          )
-          .run(randomUUID(), draftId, actor, now);
-      }
-      return this.getDocumentationDraft(draftId);
-    })();
-  }
-
-  getKnowledgeObject(knowledgeId: string): KnowledgeObjectDto {
-    const row = this.database
-      .prepare(
-        `SELECT knowledge.*, ticket.number AS ticket_number
-         FROM knowledge_objects knowledge
-         JOIN tickets ticket ON ticket.id = knowledge.ticket_id
-         WHERE knowledge.id = ?`,
-      )
-      .get(knowledgeId) as Record<string, unknown> | undefined;
-    if (!row) throw new NotFoundError("Conhecimento", knowledgeId);
-    return this.mapKnowledgeObject(row);
-  }
-
-  getKnowledgeObjectByTicket(ticketId: string): KnowledgeObjectDto | null {
-    if (!this.knowledgeSchemaAvailable) return null;
-    const row = this.database
-      .prepare(
-        `SELECT knowledge.*, ticket.number AS ticket_number
-         FROM knowledge_objects knowledge
-         JOIN tickets ticket ON ticket.id = knowledge.ticket_id
-         WHERE knowledge.ticket_id = ?`,
-      )
-      .get(ticketId) as Record<string, unknown> | undefined;
-    return row ? this.mapKnowledgeObject(row) : null;
-  }
-
-  private mapKnowledgeObject(row: Record<string, unknown>): KnowledgeObjectDto {
-    return {
-      id: String(row.id),
-      ticketId: String(row.ticket_id),
-      ticketNumber: Number(row.ticket_number),
-      version: Number(row.version),
-      status: row.status as KnowledgeObjectDto["status"],
-      candidate: row.candidate as KnowledgeObjectDto["candidate"],
-      confidence: row.confidence as KnowledgeObjectDto["confidence"],
-      suggestedType: row.suggested_type as KnowledgeObjectDto["suggestedType"],
-      audience: row.audience as KnowledgeObjectDto["audience"],
-      title: String(row.title),
-      problem: nullableString(row.problem),
-      symptom: nullableString(row.symptom),
-      context: nullableString(row.context),
-      cause: nullableString(row.cause),
-      technicalCause: nullableString(row.technical_cause),
-      solution: nullableString(row.solution),
-      procedure: parseJson<string[]>(String(row.procedure_json), []),
-      prerequisites: parseJson<string[]>(String(row.prerequisites_json), []),
-      occurrenceConditions: parseJson<string[]>(String(row.occurrence_conditions_json), []),
-      applicableConditions: parseJson<string[]>(String(row.applicable_conditions_json), []),
-      contraindications: parseJson<string[]>(String(row.contraindications_json), []),
-      impact: nullableString(row.impact),
-      affectedAudience: nullableString(row.affected_audience),
-      productFeature: nullableString(row.product_feature),
-      causes: parseJson<KnowledgeObjectDto["causes"]>(String(row.causes_json), []),
-      claims: parseJson<KnowledgeObjectDto["claims"]>(String(row.claims_json), []),
-      evidence: parseJson<KnowledgeObjectDto["evidence"]>(String(row.evidence_json), []),
-      operationalEvidenceIds: parseJson<string[]>(String(row.operational_evidence_ids_json), []),
-      toolsUsed: parseJson<string[]>(String(row.tools_used_json), []),
-      relatedTicketIds: parseJson<string[]>(String(row.related_ticket_ids_json), []),
-      unknowns: parseJson<string[]>(String(row.unknowns_json), []),
-      confirmationsNeeded: parseJson<string[]>(String(row.confirmations_needed_json), []),
-      languageLevels: parseJson<KnowledgeObjectDto["languageLevels"]>(String(row.language_levels_json), {
-        technical: null, operational: null, support: null, customer: null,
-      }),
-      duplicate: row.duplicate_json
-        ? parseJson<KnowledgeObjectDto["duplicate"]>(String(row.duplicate_json), null)
-        : null,
-      aiProviderId: nullableString(row.ai_provider_id),
-      aiModel: nullableString(row.ai_model),
-      extractedAt: nullableString(row.extracted_at),
-      reviewedAt: nullableString(row.reviewed_at),
-      reviewedBy: nullableString(row.reviewed_by),
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
-  }
-
-  updateKnowledgeObject(
-    knowledgeId: string,
-    input: UpdateKnowledgeObjectInput,
-    actor = "Operador local",
-  ): KnowledgeObjectDto {
-    assertKnowledgeIntegrity(input);
-    return this.database.transaction(() => {
-      const current = this.getKnowledgeObject(knowledgeId);
-      this.saveKnowledgeVersion(current, actor);
-      const version = current.version + 1;
-      const now = nowUtc();
-      this.database.prepare(
-        `UPDATE knowledge_objects SET
-           version = ?, status = ?, candidate = ?, confidence = ?, suggested_type = ?, audience = ?,
-           title = ?, problem = ?, symptom = ?, context = ?, cause = ?, technical_cause = ?, solution = ?,
-           procedure_json = ?, prerequisites_json = ?, occurrence_conditions_json = ?,
-           applicable_conditions_json = ?, contraindications_json = ?, impact = ?, affected_audience = ?,
-           product_feature = ?, causes_json = ?, claims_json = ?, evidence_json = ?,
-           operational_evidence_ids_json = ?, tools_used_json = ?, related_ticket_ids_json = ?,
-           unknowns_json = ?, confirmations_needed_json = ?, language_levels_json = ?,
-           reviewed_at = ?, reviewed_by = ?, updated_by = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(
-        version, input.status, input.candidate, input.confidence, input.suggestedType, input.audience,
-        input.title.trim(), nullableTrimmed(input.problem), nullableTrimmed(input.symptom),
-        nullableTrimmed(input.context), nullableTrimmed(input.cause), nullableTrimmed(input.technicalCause),
-        nullableTrimmed(input.solution), JSON.stringify(input.procedure), JSON.stringify(input.prerequisites),
-        JSON.stringify(input.occurrenceConditions), JSON.stringify(input.applicableConditions),
-        JSON.stringify(input.contraindications), nullableTrimmed(input.impact),
-        nullableTrimmed(input.affectedAudience), nullableTrimmed(input.productFeature),
-        JSON.stringify(input.causes), JSON.stringify(input.claims), JSON.stringify(input.evidence),
-        JSON.stringify(input.operationalEvidenceIds), JSON.stringify(input.toolsUsed),
-        JSON.stringify(input.relatedTicketIds), JSON.stringify(input.unknowns),
-        JSON.stringify(input.confirmationsNeeded), JSON.stringify(input.languageLevels),
-        now, actor, actor, now, knowledgeId,
-      );
-      return this.getKnowledgeObject(knowledgeId);
-    })();
-  }
-
-  reviewKnowledgeObject(
-    knowledgeId: string,
-    input: KnowledgeReviewFeedbackInput,
-    actor = "Operador local",
-  ): KnowledgeObjectDto {
-    return this.database.transaction(() => {
-      const current = this.getKnowledgeObject(knowledgeId);
-      if (
-        input.decision === "APPROVE" &&
-        (current.confidence === "LOW" || current.candidate !== "YES")
-      ) {
-        throw new ConflictError(
-          "Somente conhecimento reutilizável e suficientemente confirmado pode ser aprovado.",
-        );
-      }
-      const now = nowUtc();
-      this.database.prepare(
-        `INSERT INTO knowledge_review_feedback
-           (id, knowledge_id, decision, reasons_json, comment, actor, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(randomUUID(), knowledgeId, input.decision, JSON.stringify(input.reasons), nullableTrimmed(input.comment), actor, now);
-      const status = input.decision === "APPROVE"
-        ? "APPROVED"
-        : input.decision === "REQUEST_REGENERATION"
-          ? "DRAFT"
-          : "DEPRECATED";
-      this.database.prepare(
-        `UPDATE knowledge_objects
-         SET status = ?, reviewed_at = ?, reviewed_by = ?, updated_by = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(status, now, actor, actor, now, knowledgeId);
-      if (input.decision === "REQUEST_REGENERATION") {
-        this.queueDocumentationDraft(current.ticketId, actor);
-      }
-      return this.getKnowledgeObject(knowledgeId);
-    })();
-  }
-
-  private saveKnowledgeVersion(knowledge: KnowledgeObjectDto, actor: string): void {
-    this.database.prepare(
-      `INSERT OR IGNORE INTO knowledge_object_versions
-         (id, knowledge_id, version, snapshot_json, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), knowledge.id, knowledge.version, JSON.stringify(knowledge), actor, nowUtc());
-  }
-
-  queueKnowledgeDocument(knowledgeId: string, actor = "Operador local"): DocumentationDraftDto {
-    const knowledge = this.getKnowledgeObject(knowledgeId);
-    if (knowledge.candidate === "NO") {
-      throw new ConflictError("Este ticket foi classificado como conhecimento não reutilizável.");
-    }
-    if (!knowledge.extractedAt) {
-      throw new ConflictError("Extraia e valide o conhecimento antes de gerar a documentação.");
-    }
-    return this.database.transaction(() => {
-      const draft = this.database
-        .prepare("SELECT id FROM documentation_drafts WHERE knowledge_id = ?")
-        .get(knowledgeId) as { id: string } | undefined;
-      if (!draft) throw new ConflictError("O rascunho vinculado ao conhecimento não foi encontrado.");
-      const active = this.database.prepare(
-        "SELECT 1 FROM documentation_generation_jobs WHERE draft_id = ? AND state IN ('queued', 'running') LIMIT 1",
-      ).get(draft.id);
-      if (!active) {
-        this.database.prepare(
-          `INSERT INTO documentation_generation_jobs
-             (id, draft_id, phase, state, requested_by, requested_at)
-           VALUES (?, ?, 'document', 'queued', ?, ?)`,
-        ).run(randomUUID(), draft.id, actor, nowUtc());
-      }
-      return this.getDocumentationDraft(draft.id);
-    })();
-  }
-
-  listDocumentationDrafts(options: {
-    query?: string;
-    includeArchived?: boolean;
-  } = {}): DocumentationDraftListResponse {
-    const query = options.query?.trim() ?? "";
-    const where = [options.includeArchived ? "1 = 1" : "draft.status != 'archived'"];
-    const parameters: unknown[] = [];
-    if (query) {
-      where.push("(draft.title LIKE ? ESCAPE '\\' OR ticket.title LIKE ? ESCAPE '\\')");
-      const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
-      parameters.push(pattern, pattern);
-    }
-    const rows = this.database
-      .prepare(
-        `SELECT draft.id
-         FROM documentation_drafts draft
-         JOIN tickets ticket ON ticket.id = draft.ticket_id
-         WHERE ${where.join(" AND ")}
-         ORDER BY draft.updated_at DESC, draft.id DESC`,
-      )
-      .all(...parameters) as Array<{ id: string }>;
-    return { items: rows.map((row) => this.getDocumentationDraft(row.id)), total: rows.length };
-  }
-
-  getDocumentationDraft(draftId: string): DocumentationDraftDto {
-    const row = this.database
-      .prepare(
-        `SELECT draft.*, ticket.number AS ticket_number, ticket.title AS ticket_title,
-                job.state AS generation_state, job.error AS generation_error
-         FROM documentation_drafts draft
-         JOIN tickets ticket ON ticket.id = draft.ticket_id
-         LEFT JOIN documentation_generation_jobs job ON job.id = (
-           SELECT latest.id FROM documentation_generation_jobs latest
-           WHERE latest.draft_id = draft.id
-           ORDER BY latest.requested_at DESC, latest.rowid DESC LIMIT 1
-         )
-         WHERE draft.id = ?`,
-      )
-      .get(draftId) as Record<string, unknown> | undefined;
-    if (!row) throw new NotFoundError("Documentação", draftId);
-    const placements = parseJson<Array<{
-      attachmentId: string;
-      afterHeading: string | null;
-      caption: string;
-    }>>(String(row.image_placements_json), []);
-    const attachment = this.database.prepare(
-      `SELECT id, message_id, file_name, mime_type
-       FROM attachments WHERE id = ? AND kind = 'image' AND available = 1`,
-    );
-    const images = placements.flatMap((placement) => {
-      const source = attachment.get(placement.attachmentId) as
-        | { id: string; message_id: string; file_name: string | null; mime_type: string }
-        | undefined;
-      return source ? [{
-        attachmentId: source.id,
-        messageId: source.message_id,
-        fileName: source.file_name,
-        mimeType: source.mime_type,
-        url: `/api/attachments/${encodeURIComponent(source.id)}`,
-        caption: placement.caption,
-        afterHeading: placement.afterHeading,
-      }] : [];
-    });
-    return {
-      id: String(row.id),
-      ticketId: String(row.ticket_id),
-      ticketNumber: Number(row.ticket_number),
-      ticketTitle: String(row.ticket_title),
-      status: row.status as DocumentationDraftStatus,
-      generationState: (row.generation_state as DocumentationDraftDto["generationState"]) ?? null,
-      generationError: row.generation_error ? String(row.generation_error) : null,
-      title: String(row.title),
-      summary: String(row.summary),
-      audience: String(row.audience),
-      audienceCode: row.audience_code
-        ? row.audience_code as DocumentationDraftDto["audienceCode"]
-        : null,
-      documentType: row.document_type
-        ? row.document_type as DocumentationDraftDto["documentType"]
-        : null,
-      version: Number(row.version ?? 1),
-      knowledgeObject: row.knowledge_id
-        ? this.getKnowledgeObject(String(row.knowledge_id))
-        : null,
-      bodyMarkdown: String(row.body_markdown),
-      prerequisites: parseJson<string[]>(String(row.prerequisites_json), []),
-      warnings: parseJson<string[]>(String(row.warnings_json), []),
-      sourceMessageIds: parseJson<string[]>(String(row.source_message_ids_json), []),
-      images,
-      aiProviderId: row.ai_provider_id ? String(row.ai_provider_id) : null,
-      aiModel: row.ai_model ? String(row.ai_model) : null,
-      generatedAt: row.generated_at ? String(row.generated_at) : null,
-      reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
-      reviewedBy: row.reviewed_by ? String(row.reviewed_by) : null,
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
-  }
-
-  updateDocumentationDraft(
-    draftId: string,
-    input: UpdateDocumentationDraftInput & { actor?: string },
-  ): DocumentationDraftDto {
-    this.getDocumentationDraft(draftId);
-    const now = nowUtc();
-    const actor = input.actor?.trim() || "Operador local";
-    this.database
-      .prepare(
-        `UPDATE documentation_drafts
-         SET title = ?, summary = ?, audience = ?, body_markdown = ?,
-             prerequisites_json = ?, status = ?,
-             reviewed_at = ?, reviewed_by = ?, updated_by = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        input.title.trim(), input.summary.trim(), input.audience.trim(),
-        input.bodyMarkdown.trim(), JSON.stringify(input.prerequisites.map((item) => item.trim()).filter(Boolean)),
-        input.status, now, actor, actor, now, draftId,
-      );
-    return this.getDocumentationDraft(draftId);
-  }
-
-  deleteDocumentationDraft(draftId: string): DeleteDocumentationDraftResponse {
-    return this.database.transaction(() => {
-      const draft = this.database
-        .prepare("SELECT id, ticket_id FROM documentation_drafts WHERE id = ?")
-        .get(draftId) as { id: string; ticket_id: string } | undefined;
-      if (!draft) throw new NotFoundError("Documentação", draftId);
-
-      this.database
-        .prepare("DELETE FROM documentation_drafts WHERE id = ?")
-        .run(draftId);
-
-      return {
-        id: draft.id,
-        ticketId: draft.ticket_id,
-        deleted: true as const,
-      };
-    })();
-  }
-
-  getDocumentationJobInput(jobId: string): DocumentationDraftInput {
-    const job = this.database
-      .prepare(
-        `SELECT job.draft_id, draft.ticket_id
-         FROM documentation_generation_jobs job
-         JOIN documentation_drafts draft ON draft.id = job.draft_id
-         WHERE job.id = ?`,
-      )
-      .get(jobId) as { draft_id: string; ticket_id: string } | undefined;
-    if (!job) throw new NotFoundError("Geração de documentação", jobId);
-    const ticket = this.getTicketDetail(job.ticket_id);
-    if (!ticket.resolution) throw new ConflictError("O ticket não possui resolução registrada.");
-    const context = this.getInvestigationContext(job.ticket_id, 100);
-    const availableImages = context.messages.flatMap((message) =>
-      message.attachments.flatMap((item) =>
-        item.kind === "image" && item.id
-          ? [{ attachmentId: item.id, messageId: message.id, fileName: item.fileName, mimeType: item.mimeType ?? "image/jpeg" }]
-          : [],
-      ),
-    );
-    return {
-      draftId: job.draft_id,
-      ticketId: ticket.id,
-      ticketNumber: ticket.number,
-      title: ticket.title,
-      summary: ticket.summary,
-      resolution: ticket.resolution.summary,
-      categories: ticket.categories.map((category) => category.label),
-      messages: context.messages,
-      availableImages,
-    };
-  }
-
-  getKnowledgeExtractionJobInput(jobId: string): KnowledgeExtractionInput {
-    const base = this.getDocumentationJobInput(jobId);
-    const technicalEvidence = this.database.prepare(
-      `SELECT execution.id, execution.tool_name, execution.operation,
-              execution.summary, execution.content, execution.reference,
-              execution.executed_at
-       FROM investigation_thread_tool_executions execution
-       JOIN investigation_thread_jobs job ON job.id = execution.job_id
-       JOIN investigation_threads thread ON thread.id = job.thread_id
-       WHERE thread.ticket_id = ? AND execution.status = 'success'
-       ORDER BY execution.executed_at DESC, execution.id DESC
-       LIMIT 50`,
-    ).all(base.ticketId) as Array<{
-      id: string;
-      tool_name: string;
-      operation: string;
-      summary: string;
-      content: string;
-      reference: string | null;
-      executed_at: string;
-    }>;
-    const rows = this.database.prepare(
-      `SELECT id, ticket_id, title, problem, solution, product_feature, suggested_type, audience
-       FROM knowledge_objects
-       WHERE extracted_at IS NOT NULL
-         AND ticket_id != ?
-         AND status != 'DEPRECATED'
-       ORDER BY updated_at DESC
-       LIMIT 100`,
-    ).all(base.ticketId) as Array<{
-      id: string;
-      ticket_id: string;
-      title: string;
-      problem: string | null;
-      solution: string | null;
-      product_feature: string | null;
-      suggested_type: KnowledgeObjectDto["suggestedType"];
-      audience: KnowledgeObjectDto["audience"];
-    }>;
-    return {
-      ...base,
-      technicalEvidence: technicalEvidence.map((item) => ({
-        id: item.id,
-        toolName: item.tool_name,
-        operation: item.operation,
-        summary: item.summary,
-        content: item.content.slice(0, 4_000),
-        reference: item.reference,
-        executedAt: item.executed_at,
-      })),
-      existingKnowledge: rows.map((row) => ({
-        id: row.id,
-        ticketId: row.ticket_id,
-        title: row.title,
-        problem: row.problem,
-        solution: row.solution,
-        productFeature: row.product_feature,
-        suggestedType: row.suggested_type,
-        audience: row.audience,
-      })),
-    };
-  }
-
-  completeKnowledgeExtractionJob(
-    jobId: string,
-    result: KnowledgeExtractionResult,
-  ): DocumentationDraftDto {
-    return this.database.transaction(() => {
-      const job = this.database.prepare(
-        `SELECT job.draft_id, draft.knowledge_id
-         FROM documentation_generation_jobs job
-         JOIN documentation_drafts draft ON draft.id = job.draft_id
-         WHERE job.id = ? AND job.state = 'running' AND job.phase = 'extraction'`,
-      ).get(jobId) as { draft_id: string; knowledge_id: string | null } | undefined;
-      if (!job?.knowledge_id) {
-        throw new ConflictError("A extração de conhecimento não está em execução.");
-      }
-      const current = this.getKnowledgeObject(job.knowledge_id);
-      const now = nowUtc();
-      const version = current.extractedAt ? current.version + 1 : current.version;
-      if (current.extractedAt) this.saveKnowledgeVersion(current, "Agente de IA");
-
-      const candidates = this.database.prepare(
-        `SELECT id, title, problem, product_feature
-         FROM knowledge_objects
-         WHERE id != ? AND extracted_at IS NOT NULL AND status != 'DEPRECATED'`,
-      ).all(job.knowledge_id) as Array<{
-        id: string;
-        title: string;
-        problem: string | null;
-        product_feature: string | null;
-      }>;
-      const targetText = [result.title, result.problem, result.productFeature].filter(Boolean).join(" ");
-      const ranked = candidates
-        .map((candidate) => ({
-          ...candidate,
-          similarity: knowledgeSimilarity(
-            targetText,
-            [candidate.title, candidate.problem, candidate.product_feature].filter(Boolean).join(" "),
-          ),
-        }))
-        .toSorted((left, right) => right.similarity - left.similarity);
-      const backendDuplicate = ranked[0]?.similarity >= 0.68 ? ranked[0] : null;
-      const aiDuplicate = result.duplicateCandidateId
-        ? candidates.find((candidate) => candidate.id === result.duplicateCandidateId) ?? null
-        : null;
-      const duplicateSource = backendDuplicate ?? aiDuplicate;
-      const duplicate = duplicateSource ? {
-        knowledgeId: duplicateSource.id,
-        title: duplicateSource.title,
-        similarity: backendDuplicate?.similarity ?? 0.5,
-        differences: result.duplicateDifferences,
-      } : null;
-
-      this.database.prepare(
-        `UPDATE knowledge_objects SET
-           version = ?, status = 'IN_REVIEW', candidate = ?, confidence = ?,
-           suggested_type = ?, audience = ?, title = ?, problem = ?, symptom = ?, context = ?,
-           cause = ?, technical_cause = ?, solution = ?, procedure_json = ?, prerequisites_json = ?,
-           occurrence_conditions_json = ?, applicable_conditions_json = ?, contraindications_json = ?,
-           impact = ?, affected_audience = ?, product_feature = ?, causes_json = ?, claims_json = ?,
-           evidence_json = ?, operational_evidence_ids_json = ?, tools_used_json = ?,
-           related_ticket_ids_json = ?, unknowns_json = ?, confirmations_needed_json = ?,
-           language_levels_json = ?, duplicate_json = ?,
-           ai_provider_id = (SELECT ai_provider_id FROM documentation_generation_jobs WHERE id = ?),
-           ai_connection_id = (SELECT ai_connection_id FROM documentation_generation_jobs WHERE id = ?),
-           ai_model = (SELECT ai_model FROM documentation_generation_jobs WHERE id = ?),
-           prompt_version = ?, extracted_at = ?, reviewed_at = NULL, reviewed_by = NULL,
-           updated_by = 'Agente de IA', updated_at = ?
-         WHERE id = ?`,
-      ).run(
-        version, result.candidate, result.confidence, result.suggestedType, result.audience,
-        result.title, result.problem, result.symptom, result.context, result.cause,
-        result.technicalCause, result.solution, JSON.stringify(result.procedure),
-        JSON.stringify(result.prerequisites), JSON.stringify(result.occurrenceConditions),
-        JSON.stringify(result.applicableConditions), JSON.stringify(result.contraindications),
-        result.impact, result.affectedAudience, result.productFeature, JSON.stringify(result.causes),
-        JSON.stringify(result.claims), JSON.stringify(result.evidence),
-        JSON.stringify(result.operationalEvidenceIds), JSON.stringify(result.toolsUsed),
-        JSON.stringify(result.relatedTicketIds), JSON.stringify(result.unknowns),
-        JSON.stringify(result.confirmationsNeeded), JSON.stringify(result.languageLevels),
-        duplicate ? JSON.stringify(duplicate) : null, jobId, jobId, jobId,
-        KNOWLEDGE_EXTRACTION_PROMPT_VERSION, now, now, job.knowledge_id,
-      );
-      this.database.prepare(
-        `UPDATE documentation_generation_jobs
-         SET state = 'completed', finished_at = ?, claimed_at = NULL,
-             lease_expires_at = NULL, error = NULL WHERE id = ?`,
-      ).run(now, jobId);
-      return this.getDocumentationDraft(job.draft_id);
-    })();
-  }
-
-  completeDocumentationFromKnowledgeJob(jobId: string): DocumentationDraftDto {
-    const job = this.database.prepare(
-      `SELECT draft.knowledge_id
-       FROM documentation_generation_jobs job
-       JOIN documentation_drafts draft ON draft.id = job.draft_id
-       WHERE job.id = ? AND job.state = 'running' AND job.phase = 'document'`,
-    ).get(jobId) as { knowledge_id: string | null } | undefined;
-    if (!job?.knowledge_id) {
-      throw new ConflictError("O documento não possui conhecimento estruturado vinculado.");
-    }
-    const knowledge = this.getKnowledgeObject(job.knowledge_id);
-    if (knowledge.candidate === "NO") {
-      throw new ConflictError("Conhecimento não reutilizável não pode gerar documentação.");
-    }
-    const result = renderKnowledgeDocument(knowledge);
-    const draft = this.completeDocumentationJob(jobId, result);
-    this.database.prepare(
-      `UPDATE documentation_drafts
-       SET document_type = ?, audience_code = ?, version = ?, knowledge_id = ?
-       WHERE id = ?`,
-    ).run(knowledge.suggestedType, knowledge.audience, knowledge.version, knowledge.id, draft.id);
-    return this.getDocumentationDraft(draft.id);
-  }
-
-  completeDocumentationJob(jobId: string, result: DocumentationDraftResult): DocumentationDraftDto {
-    return this.database.transaction(() => {
-      const job = this.database
-        .prepare("SELECT draft_id FROM documentation_generation_jobs WHERE id = ? AND state = 'running'")
-        .get(jobId) as { draft_id: string } | undefined;
-      if (!job) throw new ConflictError("A geração de documentação não está em execução.");
-      const now = nowUtc();
-      this.database
-        .prepare(
-          `UPDATE documentation_drafts
-           SET status = 'draft', title = ?, summary = ?, audience = ?, body_markdown = ?,
-               prerequisites_json = ?, warnings_json = ?, source_message_ids_json = ?,
-               image_placements_json = ?, ai_provider_id = (
-                 SELECT ai_provider_id FROM documentation_generation_jobs WHERE id = ?
-               ), ai_connection_id = (
-                 SELECT ai_connection_id FROM documentation_generation_jobs WHERE id = ?
-               ), ai_model = (
-                 SELECT ai_model FROM documentation_generation_jobs WHERE id = ?
-               ), prompt_version = ?, generated_at = ?, updated_by = 'Agente de IA', updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          result.title, result.summary, result.audience, result.bodyMarkdown,
-          JSON.stringify(result.prerequisites), JSON.stringify(result.warnings),
-          JSON.stringify(result.sourceMessageIds), JSON.stringify(result.imagePlacements),
-          jobId, jobId, jobId, DOCUMENTATION_PROMPT_VERSION, now, now, job.draft_id,
-        );
-      this.database
-        .prepare(
-          `UPDATE documentation_generation_jobs
-           SET state = 'completed', finished_at = ?, claimed_at = NULL,
-               lease_expires_at = NULL, error = NULL WHERE id = ?`,
-        )
-        .run(now, jobId);
-      return this.getDocumentationDraft(job.draft_id);
-    })();
-  }
-
-  requeueDocumentationJob(jobId: string, error: string): void {
-    this.database
-      .prepare(
-        `UPDATE documentation_generation_jobs
-         SET state = 'queued', error = ?, claimed_at = NULL, lease_expires_at = NULL
-         WHERE id = ? AND state = 'running'`,
-      )
-      .run(error.slice(0, 4_000), jobId);
-  }
-
-  failDocumentationJob(jobId: string, error: string): void {
-    this.database
-      .prepare(
-        `UPDATE documentation_generation_jobs
-         SET state = 'failed', error = ?, finished_at = ?, claimed_at = NULL,
-             lease_expires_at = NULL WHERE id = ? AND state = 'running'`,
-      )
-      .run(error.slice(0, 4_000), nowUtc(), jobId);
-  }
-
-  getInvestigationContext(
-    ticketId: string,
-    messageLimit?: number,
-  ): SupportAnalysisInput {
-    if (
-      messageLimit !== undefined &&
-      (!Number.isInteger(messageLimit) || messageLimit < 1)
-    ) {
-      throw new ValidationError("Limite de mensagens deve ser um inteiro positivo");
-    }
-    const safeMessageLimit = Math.min(
-      messageLimit ?? THREAD_PROMPT_TICKET_MESSAGE_LIMIT,
-      THREAD_PROMPT_TICKET_MESSAGE_LIMIT,
-    );
-    const ticket = this.database
-      .prepare(
-        `SELECT t.id, t.client_id, t.group_id, t.affected_store_id,
-                c.name AS client_name,
-                c.kind AS client_kind,
-                c.identification_pending AS client_identification_pending,
-                g.subject AS group_name
-         FROM tickets t
-         JOIN clients c ON c.id = t.client_id
-         JOIN whatsapp_groups g ON g.id = t.group_id
-         WHERE t.id = ?`,
-      )
-      .get(ticketId) as
-      | {
-          id: string;
-          client_id: string;
-          group_id: string;
-          affected_store_id: string | null;
-          client_name: string;
-          client_kind: "agency" | "ecommerce";
-          client_identification_pending: number;
-          group_name: string;
-        }
-      | undefined;
-    if (!ticket) {
-      throw new NotFoundError("Ticket", ticketId);
-    }
-
-    const messageQuery = this.externalTicketMessagesAvailable
-      ? `SELECT id, occurred_at, text, quoted_external_id, display_name, role
-         FROM (
-           SELECT
-             m.id, m.occurred_at, m.text, m.quoted_external_id,
-             p.display_name,
-             CASE WHEN staff.participant_id IS NULL THEN 'external' ELSE 'staff' END AS role,
-             m.rowid AS source_order
-           FROM ticket_messages tm
-           JOIN messages m ON m.id = tm.message_id
-           JOIN participants p ON p.id = m.sender_id
-           LEFT JOIN staff_members staff
-             ON staff.participant_id = p.id AND staff.active = 1
-           WHERE tm.ticket_id = ?
-
-           UNION ALL
-
-           SELECT
-             external_message.id,
-             external_message.occurred_at,
-             external_message.body AS text,
-             NULL AS quoted_external_id,
-             external_message.author_name AS display_name,
-             CASE WHEN external_message.author_role = 'support' THEN 'staff' ELSE 'external' END AS role,
-             external_message.position AS source_order
-           FROM ticket_external_messages external_message
-           WHERE external_message.ticket_id = ?
-         )
-         ORDER BY occurred_at DESC, source_order DESC
-         LIMIT ?`
-      : `SELECT
-           m.id, m.occurred_at, m.text, m.quoted_external_id,
-           p.display_name,
-           CASE WHEN staff.participant_id IS NULL THEN 'external' ELSE 'staff' END AS role
-         FROM ticket_messages tm
-         JOIN messages m ON m.id = tm.message_id
-         JOIN participants p ON p.id = m.sender_id
-         LEFT JOIN staff_members staff
-           ON staff.participant_id = p.id AND staff.active = 1
-         WHERE tm.ticket_id = ?
-         ORDER BY m.occurred_at DESC, m.rowid DESC
-         LIMIT ?`;
-    const messageRowsDescending = this.database
-      .prepare(messageQuery)
-      .all(...(this.externalTicketMessagesAvailable
-        ? [ticketId, ticketId, safeMessageLimit]
-        : [ticketId, safeMessageLimit])) as Array<{
-      id: string;
-      occurred_at: string;
-      text: string | null;
-      quoted_external_id: string | null;
-      display_name: string;
-      role: "external" | "staff";
-    }>;
-    const messageRows = messageRowsDescending.reverse();
-    const attachmentStatement = this.database.prepare(
-      `SELECT id, kind, file_name, mime_type, local_path, extracted_text
-       FROM attachments WHERE message_id = ? ORDER BY created_at`,
-    );
-    const openTickets = this.database
-      .prepare(
-        `SELECT id, title, summary, status
-         FROM tickets
-         WHERE client_id = ?
-           AND id != ?
-           AND status NOT IN ('resolved', 'cancelled', 'archived')
-         ORDER BY updated_at DESC
-         LIMIT 30`,
-      )
-      .all(ticket.client_id, ticketId) as SupportAnalysisInput["openTickets"];
-    const stores = this.database
-      .prepare(
-        "SELECT name FROM client_stores WHERE client_id = ? AND active = 1 ORDER BY name",
-      )
-      .all(ticket.client_id) as Array<{ name: string }>;
-    const messages = messageRows.map((message) => ({
-      id: message.id,
-      author: message.display_name,
-      role: message.role,
-      timestampUtc: message.occurred_at,
-      text: message.text,
-      attachments: (attachmentStatement.all(message.id) as Array<{
-        id: string;
-        kind: AttachmentDto["kind"];
-        file_name: string | null;
-        mime_type: string;
-        local_path: string;
-        extracted_text: string | null;
-      }>).map((attachment) => ({
-        id: attachment.id,
-        kind:
-          attachment.kind === "pdf" || attachment.kind === "document"
-            ? "document" as const
-            : attachment.kind,
-        fileName: attachment.file_name,
-        mimeType: attachment.mime_type,
-        localPath: attachment.local_path,
-        extractedText: attachment.extracted_text,
-      })),
-      quotedMessageId: message.quoted_external_id,
-    }));
-
-    return {
-      ticketId,
-      accountName: ticket.client_name,
-      accountType: ticket.client_identification_pending
-        ? "unknown"
-        : ticket.client_kind,
-      groupName: ticket.group_name,
-      knownEcommerces: stores.map((store) => store.name),
-      categoryCatalog: this.getAnalysisCategoryCatalog(),
-      conversationState: this.getSupportConversationState(ticketId),
-      messages: limitSupportPromptMessages(messages),
-      sentResponses: this.getSupportSentResponses(ticketId),
-      openTickets: openTickets.map((item) => ({
-        ...item,
-        title: truncatePromptText(item.title, 500),
-        summary: truncatePromptText(item.summary, 2_000),
-      })),
-      resolvedPrecedents: this.getSupportResolvedPrecedents(
-        ticketId,
-        ticket.client_id,
-        ticket.affected_store_id,
-      ),
-    };
-  }
-
-  getInvestigationThreadContext(jobId: string): InvestigationThreadInput {
-    const job = this.database
-      .prepare(
-        `SELECT j.id, j.thread_id, j.operator_message_id, t.ticket_id, t.scope,
-                t.context_json, t.summary
-         FROM investigation_thread_jobs j
-         JOIN investigation_threads t ON t.id = j.thread_id
-         WHERE j.id = ?`,
-      )
-      .get(jobId) as
-      | {
-          id: string;
-          thread_id: string;
-          operator_message_id: string;
-          ticket_id: string | null;
-          scope: "ticket" | "workspace";
-          context_json: string;
-          summary: string;
-        }
-      | undefined;
-    if (!job) {
-      throw new NotFoundError("Turno do Threadmark AI", jobId);
-    }
-
-    const recentMessagesDescending = this.database
-      .prepare(
-        `SELECT id, role, body, phase, created_at
-         FROM investigation_thread_messages
-         WHERE thread_id = ?
-         ORDER BY created_at DESC, rowid DESC
-         LIMIT ?`,
-      )
-      .all(job.thread_id, THREAD_PROMPT_MESSAGE_LIMIT) as Array<{
-      id: string;
-      role: "operator" | "assistant";
-      body: string;
-      phase: InvestigationThreadInput["recentMessages"][number]["phase"];
-      created_at: string;
-    }>;
-    const recentMessages = recentMessagesDescending.reverse().map((message) => ({
-      id: message.id,
-      role: message.role,
-      body: message.body,
-      phase: message.phase,
-      createdAt: message.created_at,
-    }));
-    const operatorMessage = this.database
-      .prepare(
-        `SELECT message.rowid AS message_order, message.body,
-                message.context_json, message.actor_role,
-                actor.display_name AS actor_display_name
-         FROM investigation_thread_messages message
-         LEFT JOIN local_users actor ON actor.id = message.actor_user_id
-         WHERE message.id = ? AND message.thread_id = ?`,
-      )
-      .get(job.operator_message_id, job.thread_id) as
-      | {
-          message_order: number;
-          body: string;
-          context_json: string;
-          actor_role: AuthRole | null;
-          actor_display_name: string | null;
-        }
-      | undefined;
-    const currentContinuesTask = isTaskContinuationInstruction(
-      operatorMessage?.body ?? "",
-    );
-    const lastConclusion = operatorMessage
-      ? (this.database.prepare(
-          `SELECT COALESCE(MAX(rowid), 0) AS message_order
-           FROM investigation_thread_messages
-           WHERE thread_id = ? AND role = 'assistant' AND phase = 'conclusion'
-             AND rowid < ?`,
-        ).get(job.thread_id, operatorMessage.message_order) as { message_order: number })
-      : { message_order: 0 };
-    const previousOperatorRows = operatorMessage && currentContinuesTask
-      ? this.database.prepare(
-          `SELECT id, body, created_at, rowid AS message_order
-           FROM investigation_thread_messages
-           WHERE thread_id = ? AND role = 'operator' AND rowid < ?
-           ORDER BY rowid DESC LIMIT 20`,
-        ).all(job.thread_id, operatorMessage.message_order) as Array<{
-          id: string;
-          body: string;
-          created_at: string;
-          message_order: number;
-        }>
-      : [];
-    const resumedTaskRoot = previousOperatorRows.find(
-      (message) => !isTaskContinuationInstruction(message.body),
-    );
-    const taskRoot = operatorMessage
-      ? resumedTaskRoot ?? this.database.prepare(
-          `SELECT id, body, created_at, rowid AS message_order
-           FROM investigation_thread_messages
-           WHERE thread_id = ? AND role = 'operator'
-             AND rowid > ? AND rowid <= ?
-           ORDER BY rowid ASC LIMIT 1`,
-        ).get(
-          job.thread_id,
-          lastConclusion.message_order,
-          operatorMessage.message_order,
-        ) as {
-          id: string;
-          body: string;
-          created_at: string;
-          message_order: number;
-        } | undefined
-      : undefined;
-    const taskStartOrder = taskRoot?.message_order ?? lastConclusion.message_order;
-    const taskDirectiveRows = operatorMessage
-      ? (this.database.prepare(
-          `SELECT id, body, created_at
-           FROM investigation_thread_messages
-           WHERE thread_id = ? AND role = 'operator'
-             AND rowid >= ? AND rowid <= ?
-           ORDER BY rowid DESC LIMIT 12`,
-        ).all(
-          job.thread_id,
-          taskStartOrder,
-          operatorMessage.message_order,
-        ) as Array<{ id: string; body: string; created_at: string }>).reverse()
-      : [];
-    const images = this.database
-      .prepare(
-        `SELECT attachment.id, attachment.message_id, attachment.file_name,
-                attachment.mime_type, attachment.local_path,
-                attachment.size_bytes
-         FROM investigation_thread_message_attachments attachment
-         JOIN investigation_thread_messages message
-           ON message.id = attachment.message_id
-         WHERE message.thread_id = ?
-           AND attachment.ai_analysis_approved = 1
-         ORDER BY CASE WHEN message.id = ? THEN 0 ELSE 1 END,
-                  message.created_at DESC, attachment.created_at, attachment.id
-         LIMIT ?`,
-      )
-      .all(
-        job.thread_id,
-        job.operator_message_id,
-        THREADMARK_AI_IMAGE_MAX_COUNT,
-      ) as Array<{
-      id: string;
-      message_id: string;
-      file_name: string;
-      mime_type: ThreadmarkAiImageMimeType;
-      local_path: string;
-      size_bytes: number;
-    }>;
-    const currentContext =
-      parseThreadmarkAiContext(operatorMessage?.context_json ?? null) ??
-      parseThreadmarkAiContext(job.context_json);
-    const referencedTicketIds = new Set<string>();
-    if (job.ticket_id) referencedTicketIds.add(job.ticket_id);
-    if (currentContext?.ticketId) {
-      const exists = this.database
-        .prepare("SELECT id FROM tickets WHERE id = ?")
-        .get(currentContext.ticketId) as EntityRecord | undefined;
-      if (exists) referencedTicketIds.add(exists.id);
-    }
-    const ticketNumbers = new Set<number>();
-    if (currentContext?.ticketNumber) ticketNumbers.add(currentContext.ticketNumber);
-    for (const match of (operatorMessage?.body ?? "").matchAll(/#(\d{1,9})\b/g)) {
-      ticketNumbers.add(Number(match[1]));
-    }
-    for (const number of ticketNumbers) {
-      const referenced = this.database
-        .prepare("SELECT id FROM tickets WHERE number = ?")
-        .get(number) as EntityRecord | undefined;
-      if (referenced) referencedTicketIds.add(referenced.id);
-    }
-    if (!referencedTicketIds.size && currentContext?.groupId) {
-      const latest = this.database
-        .prepare(
-          `SELECT id FROM tickets WHERE group_id = ?
-           ORDER BY updated_at DESC, id DESC LIMIT 1`,
-        )
-        .get(currentContext.groupId) as EntityRecord | undefined;
-      if (latest) referencedTicketIds.add(latest.id);
-    }
-    const ticketContexts = [...referencedTicketIds]
-      .slice(0, 5)
-      .map((ticketId) =>
-        this.getInvestigationContext(ticketId, THREAD_PROMPT_TICKET_MESSAGE_LIMIT),
-      );
-    const ticket = ticketContexts[0] ?? this.getThreadmarkAiWorkspaceOverview();
-
-    const automaticRow = ticket.ticketId
-      ? (this.database
-          .prepare(
-            `SELECT result_json FROM investigation_jobs
-             WHERE ticket_id = ? AND state = 'completed' AND result_json IS NOT NULL
-             ORDER BY finished_at DESC, requested_at DESC, rowid DESC LIMIT 1`,
-          )
-          .get(ticket.ticketId) as { result_json: string } | undefined)
-      : undefined;
-    const automaticResult = parseJson<unknown>(
-      automaticRow?.result_json ?? null,
-      null,
-    );
-    const activePackRow = this.database.prepare(
-      `SELECT id, name, status, version, manifest_json, readiness_json,
-              created_by_user_id, created_at, updated_at, activated_at
-       FROM investigation_packs WHERE status = 'active' LIMIT 1`,
-    ).get() as {
-      id: string;
-      name: string;
-      status: "active";
-      version: number;
-      manifest_json: string;
-      readiness_json: string;
-      created_by_user_id: string | null;
-      created_at: string;
-      updated_at: string;
-      activated_at: string | null;
-    } | undefined;
-    const activeInvestigationPack = activePackRow
-      ? {
-          id: activePackRow.id,
-          name: activePackRow.name,
-          status: activePackRow.status,
-          version: activePackRow.version,
-          manifest: parseJson(activePackRow.manifest_json, {}),
-          readiness: parseJson(activePackRow.readiness_json, {}),
-          createdByUserId: activePackRow.created_by_user_id,
-          createdAt: activePackRow.created_at,
-          updatedAt: activePackRow.updated_at,
-          activatedAt: activePackRow.activated_at,
-        } as InvestigationPackDto
-      : null;
-    const investigationStateRow = this.database.prepare(
-      "SELECT state_json FROM investigation_thread_states WHERE thread_id = ?",
-    ).get(job.thread_id) as { state_json: string } | undefined;
-
-    return {
-      threadId: job.thread_id,
-      mode: job.scope,
-      currentOperatorMessageId: job.operator_message_id,
-      currentOperator:
-        operatorMessage?.actor_display_name && operatorMessage.actor_role
-          ? {
-              displayName: operatorMessage.actor_display_name,
-              role: operatorMessage.actor_role,
-            }
-          : null,
-      durableSummary: job.summary,
-      activeTask: taskRoot && operatorMessage
-        ? {
-            rootOperatorMessageId: taskRoot.id,
-            objective: taskRoot.body.slice(0, 4_000),
-            operatorDirectives: taskDirectiveRows.map((message) => ({
-              id: message.id,
-              body: message.body.slice(0, 4_000),
-              createdAt: message.created_at,
-            })),
-            continuation: currentContinuesTask,
-          }
-        : null,
-      recentMessages: limitRecentThreadMessages(recentMessages),
-      images: images.map((image) => ({
-        id: image.id,
-        messageId: image.message_id,
-        fileName: image.file_name,
-        mimeType: image.mime_type,
-        localPath: image.local_path,
-        sizeBytes: image.size_bytes,
-      })),
-      imageAnalysisApproved: images.length > 0,
-      ticket,
-      relatedTickets: ticketContexts.slice(1),
-      currentContext,
-      automaticInvestigation: isRecord(automaticResult)
-        ? (automaticResult as unknown as SupportAnalysis)
-        : null,
-      activeInvestigationPack,
-      investigationReadiness: {
-        deepInvestigationEnabled:
-          activeInvestigationPack?.readiness.deepInvestigationEnabled === true,
-        reason: activeInvestigationPack
-          ? activeInvestigationPack.readiness.deepInvestigationEnabled
-            ? null
-            : activeInvestigationPack.readiness.messages.join(" ")
-          : "Conclua o onboarding e ative um pack privado para habilitar investigações profundas.",
-      },
-      investigationState: parseJson<Record<string, unknown> | null>(
-        investigationStateRow?.state_json ?? null,
-        null,
-      ),
-      toolResults: this.getInvestigationThreadToolExecutions(job.id),
-    };
-  }
-
-  private getThreadmarkAiWorkspaceOverview(): SupportAnalysisInput {
-    const openTickets = this.database
-      .prepare(
-        `SELECT id, title, summary, status
-         FROM tickets
-         WHERE status NOT IN ('resolved', 'cancelled', 'archived')
-         ORDER BY updated_at DESC, id DESC LIMIT 30`,
-      )
-      .all() as SupportAnalysisInput["openTickets"];
-    return {
-      accountName: "Workspace Threadmark",
-      accountType: "unknown",
-      groupName: "Contexto global",
-      knownEcommerces: [],
-      categoryCatalog: this.getAnalysisCategoryCatalog(),
-      conversationState: {
-        lastExternalMessageAt: null,
-        lastSentResponseAt: null,
-        unansweredExternalMessageIds: [],
-        hasUnansweredExternalMessages: false,
-      },
-      messages: [],
-      sentResponses: [],
-      openTickets: openTickets.map((item) => ({
-        ...item,
-        title: truncatePromptText(item.title, 500),
-        summary: truncatePromptText(item.summary, 2_000),
-      })),
-      resolvedPrecedents: [],
-    };
-  }
-
-  /**
-   * Persists a trusted executor result before the next model round starts.
-   * The (job, request) key is first-write-wins so retries are idempotent and
-   * cannot rewrite an audit record that was already observed by the operator.
-   */
-  appendInvestigationThreadToolExecution(
-    jobId: string,
-    execution: InvestigationToolResult,
-  ): InvestigationToolExecutionDto {
-    const job = this.database
-      .prepare("SELECT id FROM investigation_thread_jobs WHERE id = ?")
-      .get(jobId);
-    if (!job) {
-      throw new NotFoundError("Turno do Threadmark AI", jobId);
-    }
-
-    const normalized = this.normalizeInvestigationToolExecution(execution);
-    this.database
-      .prepare(
-        `INSERT OR IGNORE INTO investigation_thread_tool_executions
-          (id, job_id, request_id, tool_id, tool_name, operation,
-           arguments_json, purpose, status, summary, content, reference,
-           executed_at, recorded_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        randomUUID(),
-        jobId,
-        normalized.requestId,
-        normalized.toolId,
-        normalized.toolName,
-        normalized.operation,
-        normalized.argumentsJson,
-        normalized.purpose,
-        normalized.status,
-        normalized.summary,
-        normalized.content,
-        normalized.reference,
-        normalized.executedAt,
-        nowUtc(),
-      );
-
-    const persisted = this.getInvestigationThreadToolExecutions(jobId).find(
-      (item) => item.requestId === normalized.requestId,
-    );
-    if (!persisted) {
-      throw new Error("Não foi possível persistir a auditoria da ferramenta");
-    }
-    return persisted;
-  }
-
-  completeInvestigationThreadJob(
-    jobId: string,
-    result: InvestigationTurnResult,
-  ): InvestigationThreadDto {
-    return this.database.transaction(() => {
-      const job = this.database
-        .prepare(
-          `SELECT j.id, j.thread_id, j.state, j.operator_message_id,
-                  j.assistant_message_id, j.requested_at, j.started_at,
-                  j.ai_model,
-                  t.ticket_id, t.scope, t.summary AS thread_summary,
-                  ticket.status AS ticket_status
-           FROM investigation_thread_jobs j
-           JOIN investigation_threads t ON t.id = j.thread_id
-           LEFT JOIN tickets ticket ON ticket.id = t.ticket_id
-           WHERE j.id = ?`,
-        )
-        .get(jobId) as
-        | {
-            id: string;
-            thread_id: string;
-            ticket_id: string | null;
-            scope: "ticket" | "workspace";
-            state: InvestigationJobState;
-            operator_message_id: string;
-            assistant_message_id: string | null;
-            requested_at: string;
-            started_at: string | null;
-            ai_model: string | null;
-            thread_summary: string;
-            ticket_status: TicketStatus | null;
-          }
-        | undefined;
-      if (!job) {
-        throw new NotFoundError("Turno do Threadmark AI", jobId);
-      }
-      if (job.state === "completed") {
-        return this.getInvestigationThread(job.thread_id);
-      }
-      if (job.state !== "queued" && job.state !== "running") {
-        throw new ValidationError(
-          `Turno não pode ser concluído a partir do estado ${job.state}`,
-        );
-      }
-
-      const auditedRequestIds = new Set(
-        this.getInvestigationThreadToolExecutions(jobId).map(
-          (execution) => execution.requestId,
-        ),
-      );
-      for (const execution of result.toolExecutions ?? []) {
-        if (auditedRequestIds.has(execution.requestId)) continue;
-        this.appendInvestigationThreadToolExecution(jobId, execution);
-        auditedRequestIds.add(execution.requestId);
-      }
-      const toolExecutions = this.getInvestigationThreadToolExecutions(jobId);
-
-      const timestamp = nowUtc();
-      const assistantMessageId = job.assistant_message_id ?? randomUUID();
-      const proposedAssistantMessage = normalizedText(
-        result.assistantMessage,
-        "Resposta da IA",
-      );
-      const proposedThreadSummary = normalizedText(
-        result.threadSummary,
-        "Resumo da investigação",
-      );
-      const proposedResponse = normalizedNullableText(
-        result.suggestedResponse,
-      );
-      const staleCompletion = job.ticket_id
-        ? this.investigationContextChangedSince(
-            job.ticket_id,
-            job.started_at ?? job.requested_at,
-          )
-        : false;
-      const terminalCompletion = job.ticket_status
-        ? isTerminalTicketStatus(job.ticket_status)
-        : false;
-      const assistantMessage = staleCompletion
-        ? "O contexto do ticket mudou durante esta investigação. A conclusão anterior foi descartada; continue a análise considerando as mensagens, respostas e anexos atuais."
-        : proposedAssistantMessage;
-      const threadSummary = staleCompletion
-        ? job.thread_summary
-        : proposedThreadSummary;
-      const evidence = staleCompletion ? [] : result.evidence;
-      const responseAlreadySent = job.ticket_id
-        ? this.isSuggestedResponseAlreadySent(job.ticket_id, proposedResponse)
-        : false;
-      const suggestedResponse = staleCompletion || terminalCompletion || responseAlreadySent
-        ? null
-        : proposedResponse;
-      const persistedPhase = staleCompletion ? "analysis" : result.phase;
-      const nextAction = staleCompletion
-        ? "O contexto mudou durante a investigação. Continue a análise e reavalie as mensagens e respostas atuais antes de concluir."
-        : normalizedNullableText(result.nextAction);
-      const confidence = staleCompletion
-        ? 0
-        : (clampConfidence(result.confidence) ?? 0);
-      const persistedResult: InvestigationTurnResult = {
-        ...result,
-        assistantMessage,
-        phase: persistedPhase,
-        threadSummary,
-        evidence,
-        suggestedResponse,
-        nextAction,
-        confidence,
-        toolExecutions,
-      };
-
-      this.database
-        .prepare(
-          `INSERT OR IGNORE INTO investigation_thread_messages
-            (id, thread_id, role, body, phase, evidence_json,
-             suggested_response, next_action, job_id, created_at)
-           VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          assistantMessageId,
-          job.thread_id,
-          assistantMessage,
-          persistedPhase,
-          JSON.stringify(evidence),
-          suggestedResponse,
-          nextAction,
-          jobId,
-          timestamp,
-        );
-
-      if (
-        job.ticket_id &&
-        !staleCompletion &&
-        !terminalCompletion &&
-        (responseAlreadySent ||
-          suggestedResponse ||
-          persistedPhase === "conclusion" ||
-          persistedPhase === "needs_information")
-      ) {
-        this.supersedeCandidateSuggestions(job.ticket_id, timestamp);
-      }
-      if (suggestedResponse && job.ticket_id) {
-        this.addSuggestion({
-          ticketId: job.ticket_id,
-          body: suggestedResponse,
-          confidence,
-          evidence: evidence.map((item) => ({
-            source: item.source,
-            label: item.summary,
-            ...(item.reference ? { reference: item.reference } : {}),
-          })),
-          model: job.ai_model?.trim() || "codex-conversational",
-          promptVersion: DEEP_INVESTIGATION_PROMPT_VERSION,
-          createdAt: timestamp,
-        });
-      }
-
-      if (job.ticket_id && !terminalCompletion) {
-        this.database
-          .prepare(
-            `UPDATE tickets
-             SET next_action = ?, updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(nextAction, timestamp, job.ticket_id);
-      }
-      this.database
-        .prepare(
-          `UPDATE investigation_threads
-           SET status = ?, summary = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run(
-          job.scope === "workspace"
-            ? "active"
-            : persistedPhase === "conclusion" ? "concluded" : "active",
-          threadSummary,
-          timestamp,
-          job.thread_id,
-        );
-      this.database
-        .prepare(
-          `UPDATE investigation_thread_jobs
-           SET state = 'completed', assistant_message_id = ?, finished_at = ?,
-               result_json = ?, error = NULL, claimed_at = NULL,
-               lease_expires_at = NULL
-           WHERE id = ?`,
-        )
-        .run(
-          assistantMessageId,
-          timestamp,
-          JSON.stringify(persistedResult),
-          jobId,
-        );
-      if (job.ticket_id) {
-        this.insertTicketEvent({
-          ticketId: job.ticket_id,
-          eventType: "investigation_thread_turn_completed",
-          actor: "Agente de IA",
-          fromStatus: null,
-          toStatus: null,
-          data: {
-            threadId: job.thread_id,
-            jobId,
-            jobKind: "thread_turn",
-            phase: persistedPhase,
-            originalPhase: result.phase,
-            confidence,
-            toolExecutionCount: toolExecutions.length,
-            suggestionCreated: Boolean(suggestedResponse),
-            staleCompletion,
-          },
-          occurredAt: timestamp,
-        });
-      }
-
-      return this.getInvestigationThread(job.thread_id);
-    })();
-  }
-
-  failInvestigationThreadJob(jobId: string, error: string): void {
-    this.database.transaction(() => {
-      const timestamp = nowUtc();
-      const result = this.database
-        .prepare(
-          `UPDATE investigation_thread_jobs
-           SET state = 'failed', finished_at = ?, error = ?,
-               claimed_at = NULL, lease_expires_at = NULL
-           WHERE id = ? AND state IN ('queued', 'running')
-           RETURNING thread_id`,
-        )
-        .get(timestamp, error.slice(0, 4_000), jobId) as
-        | { thread_id: string }
-        | undefined;
-      if (!result) {
-        const job = this.database
-          .prepare("SELECT id FROM investigation_thread_jobs WHERE id = ?")
-          .get(jobId);
-        if (!job) {
-          throw new NotFoundError("Turno do Threadmark AI", jobId);
-        }
-        return;
-      }
-      this.database
-        .prepare(
-          "UPDATE investigation_threads SET status = 'active', updated_at = ? WHERE id = ?",
-        )
-        .run(timestamp, result.thread_id);
-      const thread = this.database
-        .prepare("SELECT ticket_id FROM investigation_threads WHERE id = ?")
-        .get(result.thread_id) as { ticket_id: string | null } | undefined;
-      if (thread?.ticket_id) {
-        this.insertTicketEvent({
-          ticketId: thread.ticket_id,
-          eventType: "investigation_thread_turn_failed",
-          actor: "Agente de IA",
-          fromStatus: null,
-          toStatus: null,
-          data: {
-            threadId: result.thread_id,
-            jobId,
-            jobKind: "thread_turn",
-            error: error.slice(0, 4_000),
-          },
-          occurredAt: timestamp,
-        });
-      }
-    })();
-  }
-
-  requeueInvestigationThreadJob(
-    jobId: string,
-    error: string,
-    options: { resetAttempts?: boolean } = {},
-  ): void {
-    const result = this.database
-      .prepare(
-        `UPDATE investigation_thread_jobs
-         SET state = 'queued', started_at = NULL, claimed_at = NULL,
-             lease_expires_at = NULL, finished_at = NULL,
-             error = ?,
-             attempt_count = CASE WHEN ? THEN 0 ELSE attempt_count END
-         WHERE id = ? AND state IN ('running', 'failed')
-           AND cancelled_at IS NULL
-         RETURNING thread_id`,
-      )
-      .get(error.slice(0, 4_000), options.resetAttempts ? 1 : 0, jobId) as
-      | { thread_id: string }
-      | undefined;
-    if (!result) {
-      const job = this.database
-        .prepare("SELECT id FROM investigation_thread_jobs WHERE id = ?")
-        .get(jobId);
-      if (!job) throw new NotFoundError("Turno do Threadmark AI", jobId);
-      throw new ConflictError("Este turno não pode ser retomado.", { jobId });
-    }
-    this.database
-      .prepare(
-        "UPDATE investigation_threads SET status = 'active', updated_at = ? WHERE id = ?",
-      )
-      .run(nowUtc(), result.thread_id);
-  }
-
-  retryThreadmarkAiTurn(threadId: string): ThreadmarkAiThreadDto {
-    const thread = this.getThreadmarkAiThread(threadId);
-    if (thread.activeTurnState === "queued" || thread.activeTurnState === "running") {
-      throw new ConflictError("O Threadmark AI já está trabalhando neste turno.", {
-        threadId,
-      });
-    }
-    const failed = this.database
-      .prepare(
-        `SELECT id FROM investigation_thread_jobs
-         WHERE thread_id = ? AND state = 'failed' AND cancelled_at IS NULL
-         ORDER BY requested_at DESC, rowid DESC LIMIT 1`,
-      )
-      .get(threadId) as EntityRecord | undefined;
-    if (!failed) {
-      throw new ConflictError("Não existe um turno com falha para tentar novamente.", {
-        threadId,
-      });
-    }
-    this.requeueInvestigationThreadJob(
-      failed.id,
-      "Nova tentativa solicitada pelo operador.",
-      { resetAttempts: true },
-    );
-    return this.getThreadmarkAiThread(threadId);
-  }
-
-  completeInvestigationJob(jobId: string, analysis: SupportAnalysis): TicketDetailDto {
-    return this.database.transaction(() => {
-      const job = this.database
-        .prepare(
-          `SELECT id, ticket_id, state, started_at, ai_model,
-                  rerun_requested, rerun_instructions
-           FROM investigation_jobs WHERE id = ?`,
-        )
-        .get(jobId) as
-        | {
-            id: string;
-            ticket_id: string;
-            state: string;
-            started_at: string | null;
-            ai_model: string | null;
-            rerun_requested: number;
-            rerun_instructions: string | null;
-          }
-        | undefined;
-      if (!job) {
-        throw new NotFoundError("Job de investigação", jobId);
-      }
-      if (job.state === "completed") {
-        return this.getTicketDetail(job.ticket_id);
-      }
-
-      const timestamp = nowUtc();
-      const ticket = this.database
-        .prepare("SELECT id, client_id, status FROM tickets WHERE id = ?")
-        .get(job.ticket_id) as
-        | { id: string; client_id: string; status: TicketStatus }
-        | undefined;
-      if (!ticket) {
-        throw new NotFoundError("Ticket", job.ticket_id);
-      }
-      if (isTerminalTicketStatus(ticket.status)) {
-        this.closeAutomaticInvestigationLifecycle(
-          job.ticket_id,
-          timestamp,
-          `Resultado descartado porque o ticket está ${TICKET_STATUS_LABELS[ticket.status].toLocaleLowerCase("pt-BR")}.`,
-        );
-        return this.getTicketDetail(job.ticket_id);
-      }
-      if (!new Set(["queued", "running"]).has(job.state)) {
-        throw new ValidationError(`Job não pode ser concluído a partir do estado ${job.state}`);
-      }
-      const contextChangedSinceStart = this.investigationContextChangedSince(
-        job.ticket_id,
-        job.started_at,
-      );
-      const staleCompletion = Boolean(job.rerun_requested) || contextChangedSinceStart;
-      const effectiveAnalysis: SupportAnalysis = staleCompletion
-        ? {
-            createTicket: false,
-            outcome: "technical_investigation_required",
-            relation: "uncertain",
-            relatedTicketId: null,
-            title: "Análise desatualizada",
-            summary:
-              "O contexto mudou durante a investigação e o resultado anterior foi descartado.",
-            affectedEcommerce: null,
-            priority: analysis.priority,
-            categories: {
-              contactReason: [],
-              productArea: [],
-              platform: [],
-              symptom: [],
-            },
-            evidence: [],
-            suggestedResponse: null,
-            missingInformation: [],
-            nextAction:
-              "O contexto mudou durante a investigação. Aguarde a nova análise já enfileirada.",
-            confidence: 0,
-          }
-        : this.normalizeAutomaticReplyState(job.ticket_id, analysis);
-
-      const store = effectiveAnalysis.affectedEcommerce
-        ? (this.database
-            .prepare(
-              `SELECT id FROM client_stores
-               WHERE client_id = ? AND active = 1 AND lower(name) = lower(?)
-               LIMIT 1`,
-            )
-            .get(
-              ticket.client_id,
-              effectiveAnalysis.affectedEcommerce,
-            ) as EntityRecord | undefined)
-        : undefined;
-      const priority: TicketPriority = effectiveAnalysis.priority;
-      const title = effectiveAnalysis.title.trim();
-      const summary = effectiveAnalysis.summary.trim();
-      const nextAction = effectiveAnalysis.nextAction.trim();
-      const normalizedCategories = normalizeCategoriesForAnalysis(
-        effectiveAnalysis,
-        this.getAnalysisCategoryCatalog(),
-      );
-      const persistedAnalysis: SupportAnalysis = {
-        ...effectiveAnalysis,
-        categories: normalizedCategories,
-      };
-
-      if (!staleCompletion) {
-        this.database
-          .prepare(
-            `UPDATE tickets SET
-              title = CASE WHEN ? = '' THEN title ELSE ? END,
-              summary = CASE WHEN ? = '' THEN summary ELSE ? END,
-              priority = ?,
-              confidence = ?,
-              needs_review = CASE WHEN ? = 'uncertain' THEN 1 ELSE needs_review END,
-              ai_relation = ?,
-              next_action = CASE WHEN ? = '' THEN next_action ELSE ? END,
-              affected_store_id = COALESCE(?, affected_store_id),
-              updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(
-            title,
-            title,
-            summary,
-            summary,
-            priority,
-            effectiveAnalysis.confidence,
-            effectiveAnalysis.relation,
-            effectiveAnalysis.relation,
-            nextAction,
-            nextAction,
-            store?.id ?? null,
-            timestamp,
-            job.ticket_id,
-          );
-
-        const previousAiCategoryRows = this.database
-          .prepare(
-            `SELECT category_id AS id
-             FROM ticket_categories
-             WHERE ticket_id = ? AND source = 'ai'`,
-          )
-          .all(job.ticket_id) as EntityRecord[];
-        this.database
-          .prepare(
-            `DELETE FROM ticket_categories
-             WHERE ticket_id = ? AND source = 'ai'`,
-          )
-          .run(job.ticket_id);
-        const categoryGroups: Array<{
-          facet: CategoryFacet;
-          values: string[];
-        }> = [
-          { facet: "reason", values: normalizedCategories.contactReason },
-          { facet: "product", values: normalizedCategories.productArea },
-          { facet: "platform", values: normalizedCategories.platform },
-          { facet: "symptom", values: normalizedCategories.symptom },
-        ];
-        for (const group of categoryGroups) {
-          for (const rawLabel of group.values) {
-            const label = rawLabel.trim();
-            const slug = slugify(label);
-            if (!label || !slug) {
-              continue;
-            }
-            const category = this.upsertCategory({
-              facet: group.facet,
-              slug,
-              label,
-            });
-            this.addTicketCategoryInternal(
-              job.ticket_id,
-              category.id,
-              "ai",
-              effectiveAnalysis.confidence,
-              timestamp,
-            );
-          }
-        }
-        this.deleteOrphanCategories(
-          previousAiCategoryRows.map((category) => category.id),
-        );
-
-        this.supersedeCandidateSuggestions(job.ticket_id, timestamp);
-        if (effectiveAnalysis.suggestedResponse?.trim()) {
-          this.addSuggestion({
-            ticketId: job.ticket_id,
-            body: effectiveAnalysis.suggestedResponse,
-            confidence: effectiveAnalysis.confidence,
-            evidence: effectiveAnalysis.evidence.map((evidence) => ({
-              source: evidence.source,
-              label: evidence.summary,
-              ...(evidence.reference ? { reference: evidence.reference } : {}),
-            })),
-            missingInformation: effectiveAnalysis.missingInformation,
-            model: job.ai_model?.trim() || "codex",
-            promptVersion: AUTOMATIC_INVESTIGATION_PROMPT_VERSION,
-            createdAt: timestamp,
-          });
-        }
-      }
-
-      this.database
-        .prepare(
-          `UPDATE investigation_jobs
-           SET state = 'completed', finished_at = ?, result_json = ?, error = NULL,
-               claimed_at = NULL, lease_expires_at = NULL
-           WHERE id = ?`,
-        )
-        .run(timestamp, JSON.stringify(persistedAnalysis), jobId);
-      this.insertTicketEvent({
-        ticketId: job.ticket_id,
-        eventType: "investigation_completed",
-        actor: "Agente de IA",
-        fromStatus: null,
-        toStatus: null,
-        data: {
-          jobId,
-          jobKind: "automatic",
-          outcome: effectiveAnalysis.outcome,
-          relation: effectiveAnalysis.relation,
-          confidence: effectiveAnalysis.confidence,
-          createTicket: effectiveAnalysis.createTicket,
-          relatedTicketId: effectiveAnalysis.relatedTicketId,
-          affectedEcommerceMatched: Boolean(store),
-          staleCompletion,
-          contextChangedSinceStart,
-        },
-        occurredAt: timestamp,
-      });
-      return this.getTicketDetail(job.ticket_id);
-    })();
-  }
-
-  failInvestigationJob(jobId: string, error: string): void {
-    this.database.transaction(() => {
-      const timestamp = nowUtc();
-      const job = this.database
-        .prepare(
-          `SELECT id, ticket_id, state, rerun_requested, rerun_instructions
-           FROM investigation_jobs WHERE id = ?`,
-        )
-        .get(jobId) as
-        | {
-            id: string;
-            ticket_id: string;
-            state: string;
-            rerun_requested: number;
-            rerun_instructions: string | null;
-          }
-        | undefined;
-      if (!job) {
-        throw new NotFoundError("Job de investigação", jobId);
-      }
-      if (!new Set(["queued", "running"]).has(job.state)) {
-        return;
-      }
-
-      this.database
-        .prepare(
-          `UPDATE investigation_jobs
-           SET state = 'failed', finished_at = ?, error = ?,
-               claimed_at = NULL, lease_expires_at = NULL
-           WHERE id = ? AND state IN ('queued', 'running')`,
-        )
-        .run(timestamp, error.slice(0, 4_000), jobId);
-      this.insertTicketEvent({
-        ticketId: job.ticket_id,
-        eventType: "investigation_failed",
-        actor: "Agente de IA",
-        fromStatus: null,
-        toStatus: null,
-        data: {
-          jobId,
-          jobKind: "automatic",
-          error: error.slice(0, 4_000),
-        },
-        occurredAt: timestamp,
-      });
-    })();
   }
 
   listTickets(filters: TicketListFilters = {}): TicketListResponse {
@@ -11458,7 +7884,7 @@ export class SupportStore {
     if (filters.query?.trim()) {
       const search = `%${filters.query.trim()}%`;
       where.push(
-        `(t.title LIKE ? OR t.summary LIKE ? OR c.name LIKE ? OR g.subject LIKE ? OR s.name LIKE ?
+        `(CAST(t.number AS TEXT) LIKE ? OR t.title LIKE ? OR t.summary LIKE ? OR c.name LIKE ? OR g.subject LIKE ? OR s.name LIKE ?
           OR EXISTS (
             SELECT 1
             FROM ticket_messages requester_search_ticket_message
@@ -11474,7 +7900,7 @@ export class SupportStore {
               AND (requester_search.display_name LIKE ? OR requester_search.phone_e164 LIKE ?)
           ))`,
       );
-      parameters.push(search, search, search, search, search, search, search);
+      parameters.push(search, search, search, search, search, search, search, search);
     }
 
     const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -11879,79 +8305,7 @@ export class SupportStore {
           data: { categoryId },
           occurredAt: timestamp,
         });
-      }
-      return this.getTicketDetail(ticketId);
-    })();
-  }
-
-  updateTicketCategoriesFromAi(
-    ticketId: string,
-    input: { addCategoryIds: string[]; removeCategoryIds: string[] },
-    actor = "Threadmark AI",
-  ): TicketDetailDto {
-    const addCategoryIds = [...new Set(input.addCategoryIds)];
-    const removeCategoryIds = [...new Set(input.removeCategoryIds)];
-    const conflicts = addCategoryIds.filter((categoryId) => removeCategoryIds.includes(categoryId));
-    if (conflicts.length) {
-      throw new ValidationError("Uma categoria não pode ser adicionada e removida na mesma atualização", {
-        categoryIds: conflicts,
-      });
-    }
-
-    return this.database.transaction(() => {
-      const ticket = this.database
-        .prepare("SELECT id FROM tickets WHERE id = ?")
-        .get(ticketId) as { id: string } | undefined;
-      if (!ticket) throw new NotFoundError("Ticket", ticketId);
-
-      const categoryIds = [...addCategoryIds, ...removeCategoryIds];
-      for (const categoryId of categoryIds) {
-        const category = this.database
-          .prepare("SELECT id FROM categories WHERE id = ?")
-          .get(categoryId);
-        if (!category) throw new NotFoundError("Categoria", categoryId);
-      }
-
-      const timestamp = nowUtc();
-      let changed = false;
-      for (const categoryId of addCategoryIds) {
-        const alreadyLinked = this.database
-          .prepare("SELECT 1 FROM ticket_categories WHERE ticket_id = ? AND category_id = ?")
-          .get(ticketId, categoryId) !== undefined;
-        this.addTicketCategoryInternal(ticketId, categoryId, "ai", 1, timestamp);
-        if (!alreadyLinked) {
-          changed = true;
-          this.insertTicketEvent({
-            ticketId,
-            eventType: "ticket_category_added",
-            actor,
-            fromStatus: null,
-            toStatus: null,
-            data: { categoryId, source: "ai" },
-            occurredAt: timestamp,
-          });
-        }
-      }
-      for (const categoryId of removeCategoryIds) {
-        const removed = this.database
-          .prepare("DELETE FROM ticket_categories WHERE ticket_id = ? AND category_id = ?")
-          .run(ticketId, categoryId).changes > 0;
-        if (removed) {
-          changed = true;
-          this.insertTicketEvent({
-            ticketId,
-            eventType: "ticket_category_removed",
-            actor,
-            fromStatus: null,
-            toStatus: null,
-            data: { categoryId, source: "ai" },
-            occurredAt: timestamp,
-          });
-        }
-      }
-      if (changed) {
-        this.database.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(timestamp, ticketId);
-        this.invalidateLegacyAutomaticGuidance(ticketId, timestamp);
+        this.invalidateTicketGuidance(ticketId, timestamp);
       }
       return this.getTicketDetail(ticketId);
     })();
@@ -11990,8 +8344,22 @@ export class SupportStore {
         data: { categoryId },
         occurredAt: timestamp,
       });
+      this.invalidateTicketGuidance(ticketId, timestamp);
       return this.getTicketDetail(ticketId);
     })();
+  }
+
+  getTicketByNumber(number: number): TicketDetailDto {
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      throw new ValidationError("Número do ticket deve ser um inteiro positivo");
+    }
+    const row = this.database
+      .prepare("SELECT id FROM tickets WHERE number = ?")
+      .get(number) as EntityRecord | undefined;
+    if (!row) {
+      throw new NotFoundError("Ticket", `#${number}`);
+    }
+    return this.getTicketDetail(row.id);
   }
 
   getTicketDetail(ticketId: string): TicketDetailDto {
@@ -12011,9 +8379,7 @@ export class SupportStore {
       suggestions: this.getSuggestions(ticketId),
       sentResponses: this.getSentResponses(ticketId),
       resolution: this.getResolution(ticketId),
-      latestInvestigation: this.getLatestInvestigation(ticketId),
-      investigationThread: this.getInvestigationThreadSummaryForTicket(ticketId),
-      knowledgeObject: this.getKnowledgeObjectByTicket(ticketId),
+
     };
   }
 
@@ -13027,100 +9393,6 @@ export class SupportStore {
     }));
   }
 
-  listInvestigationJobs(
-    filters: InvestigationJobListFilters = {},
-  ): InvestigationJobListResponse {
-    const requestedLimit = filters.limit ?? 50;
-    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
-      throw new ValidationError("limit deve ser um inteiro positivo");
-    }
-    const limit = Math.min(requestedLimit, 200);
-    const states = filters.states?.length
-      ? [...new Set(filters.states)]
-      : undefined;
-    const invalidStates = states?.filter(
-      (state) => !INVESTIGATION_JOB_STATES.includes(state),
-    );
-    if (invalidStates?.length) {
-      throw new ValidationError(
-        `Estado de investigação inválido: ${invalidStates.join(", ")}`,
-      );
-    }
-    const where = states
-      ? `WHERE c.ignored_at IS NULL AND j.state IN (${states.map(() => "?").join(", ")})`
-      : "WHERE c.ignored_at IS NULL";
-    const rows = this.database
-      .prepare(
-        `SELECT
-          j.id,
-          j.ticket_id,
-          t.number AS ticket_number,
-          t.title AS ticket_title,
-          c.name AS client_name,
-          j.state,
-          j.instructions,
-          j.requested_at,
-          j.started_at,
-          j.finished_at,
-          j.attempt_count,
-          j.error
-         FROM investigation_jobs j
-         JOIN tickets t ON t.id = j.ticket_id
-         JOIN clients c ON c.id = t.client_id
-         ${where}
-         ORDER BY
-           CASE j.state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END,
-           COALESCE(j.started_at, j.requested_at) DESC
-         LIMIT ?`,
-      )
-      .all(...(states ?? []), limit) as Array<{
-      id: string;
-      ticket_id: string;
-      ticket_number: number;
-      ticket_title: string;
-      client_name: string;
-      state: InvestigationJobState;
-      instructions: string | null;
-      requested_at: string;
-      started_at: string | null;
-      finished_at: string | null;
-      attempt_count: number;
-      error: string | null;
-    }>;
-    const rawCounts = this.database
-      .prepare(
-        `SELECT j.state, COUNT(*) AS count
-         FROM investigation_jobs j
-         JOIN tickets t ON t.id = j.ticket_id
-         JOIN clients c ON c.id = t.client_id
-         WHERE c.ignored_at IS NULL
-         GROUP BY j.state`,
-      )
-      .all() as Array<{ state: InvestigationJobState; count: number }>;
-    const countMap = new Map(rawCounts.map((item) => [item.state, item.count]));
-
-    return {
-      items: rows.map((row) => ({
-        id: row.id,
-        ticketId: row.ticket_id,
-        ticketNumber: row.ticket_number,
-        ticketTitle: row.ticket_title,
-        clientName: row.client_name,
-        state: row.state,
-        instructions: row.instructions,
-        requestedAt: row.requested_at,
-        startedAt: row.started_at,
-        finishedAt: row.finished_at,
-        attemptCount: row.attempt_count,
-        error: row.error,
-      })),
-      counts: INVESTIGATION_JOB_STATES.map((state) => ({
-        state,
-        count: countMap.get(state) ?? 0,
-      })),
-    };
-  }
-
   listClients(): ClientSummaryDto[] {
     const rows = this.database
       .prepare(
@@ -13536,7 +9808,7 @@ export class SupportStore {
     ticketId: string,
     messageId: string,
     capturedAt: string,
-    supersedeCandidatesOnCapture = true,
+    invalidateGuidanceOnCapture = true,
   ): AttachedStaffCaptureResult {
     const message = this.database
       .prepare(
@@ -13621,9 +9893,10 @@ export class SupportStore {
     if (!newlyCaptured) {
       return { responseCaptured: true, newlyCaptured: false };
     }
-    if (supersedeCandidatesOnCapture) {
-      this.invalidateLegacyAutomaticGuidance(ticketId, capturedAt);
+    if (invalidateGuidanceOnCapture) {
+      this.invalidateTicketGuidance(ticketId, capturedAt);
     }
+
     return { responseCaptured: true, newlyCaptured: true };
   }
 
@@ -13672,7 +9945,7 @@ export class SupportStore {
       )
       .all(messageId) as EntityRecord[];
     for (const ticket of tickets) {
-      this.invalidateLegacyAutomaticGuidance(ticket.id, updatedAt);
+      this.invalidateTicketGuidance(ticket.id, updatedAt);
     }
   }
 
@@ -14315,567 +10588,6 @@ export class SupportStore {
     return rows.map((row) => this.mapSuggestion(row));
   }
 
-  private getInvestigationThreadSummaryForTicket(
-    ticketId: string,
-  ): InvestigationThreadSummaryDto | null {
-    const row = this.database
-      .prepare(
-        `SELECT t.id, t.status, t.updated_at,
-                (SELECT MAX(message.created_at)
-                 FROM investigation_thread_messages message
-                 WHERE message.thread_id = t.id
-                   AND message.role = 'assistant') AS last_assistant_message_at,
-                (SELECT j.state FROM investigation_thread_jobs j
-                 WHERE j.thread_id = t.id AND j.state IN ('queued', 'running')
-                 ORDER BY j.requested_at DESC, j.rowid DESC LIMIT 1) AS active_turn_state
-         FROM investigation_threads t WHERE t.ticket_id = ?`,
-      )
-      .get(ticketId) as
-      | {
-          id: string;
-          status: InvestigationThreadSummaryDto["status"];
-          updated_at: string;
-          last_assistant_message_at: string | null;
-          active_turn_state: InvestigationJobState | null;
-        }
-      | undefined;
-    return row
-      ? {
-          id: row.id,
-          status: row.status,
-          updatedAt: row.updated_at,
-          lastAssistantMessageAt: row.last_assistant_message_at,
-          activeTurnState: row.active_turn_state,
-        }
-      : null;
-  }
-
-  private normalizeInvestigationToolExecution(
-    execution: InvestigationToolResult,
-  ): InvestigationToolExecutionDto {
-    if (execution.status !== "success" && execution.status !== "error") {
-      throw new ValidationError("Status da execução da ferramenta é inválido");
-    }
-    const executedAt = normalizedBoundedText(
-      execution.executedAt,
-      "Data de execução da ferramenta",
-      100,
-    );
-    if (Number.isNaN(Date.parse(executedAt))) {
-      throw new ValidationError("Data de execução da ferramenta é inválida");
-    }
-    return {
-      requestId: normalizedBoundedText(
-        execution.requestId,
-        "Identificador da solicitação",
-        TOOL_AUDIT_REQUEST_ID_MAX_LENGTH,
-      ),
-      toolId: normalizedBoundedText(
-        execution.toolId,
-        "Identificador da ferramenta",
-        TOOL_AUDIT_IDENTITY_MAX_LENGTH,
-      ),
-      toolName: normalizedBoundedText(
-        execution.toolName,
-        "Nome da ferramenta",
-        TOOL_AUDIT_IDENTITY_MAX_LENGTH,
-      ),
-      operation: normalizedBoundedText(
-        execution.operation,
-        "Operação da ferramenta",
-        TOOL_AUDIT_IDENTITY_MAX_LENGTH,
-      ),
-      argumentsJson: normalizedBoundedText(
-        execution.argumentsJson,
-        "Argumentos da ferramenta",
-        TOOL_AUDIT_ARGUMENTS_MAX_LENGTH,
-      ),
-      purpose: normalizedBoundedText(
-        execution.purpose,
-        "Finalidade da ferramenta",
-        TOOL_AUDIT_PURPOSE_MAX_LENGTH,
-      ),
-      status: execution.status,
-      summary: normalizedBoundedText(
-        execution.summary,
-        "Resumo da execução",
-        TOOL_AUDIT_SUMMARY_MAX_LENGTH,
-      ),
-      content: normalizedBoundedText(
-        truncateToolAuditContent(execution.content),
-        "Conteúdo da execução",
-        TOOL_AUDIT_CONTENT_MAX_LENGTH,
-      ),
-      reference: execution.reference
-        ? normalizedBoundedText(
-            execution.reference,
-            "Referência da execução",
-            TOOL_AUDIT_IDENTITY_MAX_LENGTH,
-          )
-        : null,
-      executedAt,
-    };
-  }
-
-  private getInvestigationThreadToolExecutions(
-    jobId: string,
-  ): InvestigationToolExecutionDto[] {
-    const rows = this.database
-      .prepare(
-        `SELECT request_id, tool_id, tool_name, operation, arguments_json,
-                purpose, status, summary, content, reference, executed_at
-         FROM investigation_thread_tool_executions
-         WHERE job_id = ?
-         ORDER BY executed_at, rowid`,
-      )
-      .all(jobId) as Array<{
-      request_id: string;
-      tool_id: string;
-      tool_name: string;
-      operation: string;
-      arguments_json: string;
-      purpose: string;
-      status: InvestigationToolExecutionDto["status"];
-      summary: string;
-      content: string;
-      reference: string | null;
-      executed_at: string;
-    }>;
-    return rows.map((row) => ({
-      requestId: row.request_id,
-      toolId: row.tool_id,
-      toolName: row.tool_name,
-      operation: row.operation,
-      argumentsJson: row.arguments_json,
-      purpose: row.purpose,
-      status: row.status,
-      summary: row.summary,
-      content: row.content,
-      reference: row.reference,
-      executedAt: row.executed_at,
-    }));
-  }
-
-  private getInvestigationThreadMessages(
-    threadId: string,
-  ): InvestigationThreadMessageDto[] {
-    const attachmentRows = this.database
-      .prepare(
-        `SELECT attachment.id, attachment.message_id, attachment.mime_type,
-                attachment.file_name, attachment.size_bytes
-         FROM investigation_thread_message_attachments attachment
-         JOIN investigation_thread_messages message
-           ON message.id = attachment.message_id
-         WHERE message.thread_id = ?
-         ORDER BY attachment.created_at, attachment.id`,
-      )
-      .all(threadId) as Array<{
-      id: string;
-      message_id: string;
-      mime_type: InvestigationThreadMessageDto["attachments"][number]["mimeType"];
-      file_name: string;
-      size_bytes: number;
-    }>;
-    const attachmentsByMessage = new Map<
-      string,
-      InvestigationThreadMessageDto["attachments"]
-    >();
-    for (const attachment of attachmentRows) {
-      const current = attachmentsByMessage.get(attachment.message_id) ?? [];
-      current.push({
-        id: attachment.id,
-        fileName: attachment.file_name,
-        mimeType: attachment.mime_type,
-        sizeBytes: attachment.size_bytes,
-        url: `/api/threadmark-ai/attachments/${encodeURIComponent(attachment.id)}`,
-      });
-      attachmentsByMessage.set(attachment.message_id, current);
-    }
-    const rows = this.database
-      .prepare(
-        `SELECT message.id, message.role, message.actor_user_id,
-                message_actor.display_name AS actor_display_name,
-                message.body, message.phase,
-                message.evidence_json, message.suggested_response,
-                message.next_action, message.context_json, message.created_at,
-                assistant_job.result_json,
-                COALESCE(assistant_job.ai_provider_id, unfinished_job.ai_provider_id)
-                  AS ai_provider_id,
-                COALESCE(assistant_job.ai_model, unfinished_job.ai_model)
-                  AS ai_model,
-                COALESCE(assistant_job.ai_workload, unfinished_job.ai_workload)
-                  AS ai_workload,
-                COALESCE(assistant_job.ai_model_calls, unfinished_job.ai_model_calls, 0)
-                  AS ai_model_calls,
-                COALESCE(assistant_job.ai_input_tokens, unfinished_job.ai_input_tokens, 0)
-                  AS ai_input_tokens,
-                COALESCE(assistant_job.ai_cached_input_tokens, unfinished_job.ai_cached_input_tokens, 0)
-                  AS ai_cached_input_tokens,
-                COALESCE(assistant_job.ai_output_tokens, unfinished_job.ai_output_tokens, 0)
-                  AS ai_output_tokens,
-                COALESCE(assistant_job.ai_reasoning_output_tokens, unfinished_job.ai_reasoning_output_tokens, 0)
-                  AS ai_reasoning_output_tokens,
-                COALESCE(assistant_job.id, unfinished_job.id) AS execution_job_id
-         FROM investigation_thread_messages message
-         LEFT JOIN investigation_thread_jobs assistant_job
-           ON assistant_job.id = message.job_id
-         LEFT JOIN investigation_thread_jobs unfinished_job
-           ON unfinished_job.operator_message_id = message.id
-          AND unfinished_job.assistant_message_id IS NULL
-         LEFT JOIN local_users message_actor
-           ON message_actor.id = message.actor_user_id
-         WHERE message.thread_id = ? ORDER BY message.created_at, message.rowid`,
-      )
-      .all(threadId) as Array<{
-      id: string;
-      role: InvestigationThreadMessageDto["role"];
-      actor_user_id: string | null;
-      actor_display_name: string | null;
-      body: string;
-      phase: InvestigationThreadMessageDto["phase"];
-      evidence_json: string;
-      suggested_response: string | null;
-      next_action: string | null;
-      context_json: string;
-      created_at: string;
-      result_json: string | null;
-      ai_provider_id: InvestigationThreadMessageDto["aiProviderId"];
-      ai_model: string | null;
-      ai_workload: InvestigationThreadMessageDto["aiWorkload"];
-      ai_model_calls: number;
-      ai_input_tokens: number;
-      ai_cached_input_tokens: number;
-      ai_output_tokens: number;
-      ai_reasoning_output_tokens: number;
-      execution_job_id: string | null;
-    }>;
-    return rows.map((row) => {
-      const audited = row.execution_job_id
-        ? this.getInvestigationThreadToolExecutions(row.execution_job_id)
-        : [];
-      return {
-        id: row.id,
-        role: row.role,
-        author:
-          row.actor_user_id && row.actor_display_name
-            ? {
-                userId: row.actor_user_id,
-                displayName: row.actor_display_name,
-              }
-            : null,
-        body: row.body,
-        phase: row.phase,
-        aiProviderId: row.ai_provider_id,
-        aiModel: row.ai_model,
-        aiWorkload: row.ai_workload,
-        aiTokenUsage: row.ai_model_calls > 0
-          ? {
-              modelCalls: row.ai_model_calls,
-              inputTokens: row.ai_input_tokens,
-              cachedInputTokens: row.ai_cached_input_tokens,
-              outputTokens: row.ai_output_tokens,
-              reasoningOutputTokens: row.ai_reasoning_output_tokens,
-            }
-          : null,
-        evidence: this.parseInvestigationEvidence(row.evidence_json),
-        suggestedResponse: row.suggested_response,
-        nextAction: row.next_action,
-        attachments: attachmentsByMessage.get(row.id) ?? [],
-        context: parseThreadmarkAiContext(row.context_json),
-        toolExecutions: audited.length
-          ? audited
-          : this.parseInvestigationToolExecutions(row.result_json),
-        createdAt: row.created_at,
-      };
-    });
-  }
-
-  private getInvestigationThreadTurns(
-    threadId: string,
-  ): InvestigationThreadTurnDto[] {
-    const rows = this.database
-      .prepare(
-        `SELECT id,
-                CASE WHEN cancelled_at IS NOT NULL THEN 'cancelled' ELSE state END AS state,
-                operator_message_id, assistant_message_id,
-                requested_at, started_at, finished_at, attempt_count,
-                error, result_json, ai_provider_id, ai_model, ai_workload,
-                ai_model_calls, ai_input_tokens, ai_cached_input_tokens,
-                ai_output_tokens, ai_reasoning_output_tokens,
-                cancelled_at, cancelled_by
-         FROM investigation_thread_jobs
-         WHERE thread_id = ? ORDER BY requested_at, rowid`,
-      )
-      .all(threadId) as Array<{
-      id: string;
-      state: InvestigationJobState;
-      operator_message_id: string;
-      assistant_message_id: string | null;
-      requested_at: string;
-      started_at: string | null;
-      finished_at: string | null;
-      attempt_count: number;
-      error: string | null;
-      result_json: string | null;
-      ai_provider_id: InvestigationThreadTurnDto["aiProviderId"];
-      ai_model: string | null;
-      ai_workload: InvestigationThreadTurnDto["aiWorkload"];
-      ai_model_calls: number;
-      ai_input_tokens: number;
-      ai_cached_input_tokens: number;
-      ai_output_tokens: number;
-      ai_reasoning_output_tokens: number;
-      cancelled_at: string | null;
-      cancelled_by: string | null;
-    }>;
-
-    return rows.map((row) => {
-      const audited = this.getInvestigationThreadToolExecutions(row.id);
-      const parsedResult = this.parseInvestigationTurnResult(row.result_json);
-      return {
-        id: row.id,
-        state: row.state,
-        operatorMessageId: row.operator_message_id,
-        assistantMessageId: row.assistant_message_id,
-        requestedAt: row.requested_at,
-        startedAt: row.started_at,
-        finishedAt: row.finished_at,
-        attemptCount: row.attempt_count,
-        error: row.error,
-        aiProviderId: row.ai_provider_id,
-        aiModel: row.ai_model,
-        aiWorkload: row.ai_workload,
-        aiTokenUsage: row.ai_model_calls > 0
-          ? {
-              modelCalls: row.ai_model_calls,
-              inputTokens: row.ai_input_tokens,
-              cachedInputTokens: row.ai_cached_input_tokens,
-              outputTokens: row.ai_output_tokens,
-              reasoningOutputTokens: row.ai_reasoning_output_tokens,
-            }
-          : null,
-        cancelledAt: row.cancelled_at,
-        cancelledBy: row.cancelled_by,
-        toolExecutions: audited.length
-          ? audited
-          : parsedResult?.toolExecutions ?? [],
-        result: parsedResult
-          ? {
-              ...parsedResult,
-              toolExecutions: audited.length
-                ? audited
-                : parsedResult.toolExecutions,
-            }
-          : null,
-      };
-    });
-  }
-
-  private parseInvestigationEvidence(
-    json: string | null,
-  ): InvestigationThreadMessageDto["evidence"] {
-    const parsed = parseJson<unknown>(json, []);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      if (!isRecord(item)) return [];
-      const source = trimmedString(item.source);
-      const summary = trimmedString(item.summary);
-      if (!source || !summary) return [];
-      return [{
-        source,
-        summary,
-        reference: trimmedString(item.reference),
-      }];
-    });
-  }
-
-  private parseInvestigationTurnResult(
-    json: string | null,
-  ): InvestigationTurnResultDto | null {
-    const parsed = parseJson<unknown>(json, null);
-    if (!isRecord(parsed)) return null;
-    const assistantMessage = trimmedString(parsed.assistantMessage);
-    const threadSummary = trimmedString(parsed.threadSummary);
-    const phase = parsed.phase;
-    const confidence = parsed.confidence;
-    if (
-      !assistantMessage ||
-      !threadSummary ||
-      typeof phase !== "string" ||
-      !INVESTIGATION_TURN_PHASES.includes(
-        phase as InvestigationTurnResultDto["phase"],
-      ) ||
-      typeof confidence !== "number" ||
-      confidence < 0 ||
-      confidence > 1
-    ) {
-      return null;
-    }
-    return {
-      assistantMessage,
-      phase: phase as InvestigationTurnResultDto["phase"],
-      threadSummary,
-      findings: this.parseInvestigationFindings(parsed.findings),
-      evidence: this.parseInvestigationEvidence(
-        JSON.stringify(parsed.evidence ?? []),
-      ),
-      suggestedResponse: trimmedString(parsed.suggestedResponse),
-      nextAction: trimmedString(parsed.nextAction),
-      confidence,
-      toolExecutions: this.parseInvestigationToolExecutions(json),
-    };
-  }
-
-  private parseInvestigationFindings(
-    value: unknown,
-  ): InvestigationTurnResultDto["findings"] {
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((item) => {
-      if (!isRecord(item)) return [];
-      const statement = trimmedString(item.statement);
-      const kind = item.kind;
-      if (
-        !statement ||
-        (kind !== "fact" && kind !== "hypothesis" && kind !== "missing_information")
-      ) return [];
-      const evidenceReferences = Array.isArray(item.evidenceReferences)
-        ? item.evidenceReferences.flatMap((reference) => {
-            const parsed = trimmedString(reference);
-            return parsed ? [parsed] : [];
-          })
-        : [];
-      return [{ statement, kind, evidenceReferences }];
-    });
-  }
-
-  private parseInvestigationToolExecutions(
-    json: string | null,
-  ): InvestigationTurnResultDto["toolExecutions"] {
-    const parsed = parseJson<unknown>(json, null);
-    if (!isRecord(parsed) || !Array.isArray(parsed.toolExecutions)) return [];
-    return parsed.toolExecutions.flatMap((item) => {
-      if (!isRecord(item)) return [];
-      const requestId = trimmedString(item.requestId);
-      const toolId = trimmedString(item.toolId);
-      const toolName = trimmedString(item.toolName);
-      const operation = trimmedString(item.operation);
-      const argumentsJson = trimmedString(item.argumentsJson);
-      const purpose = trimmedString(item.purpose);
-      const status = item.status;
-      const summary = trimmedString(item.summary);
-      const content = trimmedString(item.content);
-      const executedAt = trimmedString(item.executedAt);
-      if (
-        !requestId ||
-        !toolId ||
-        !toolName ||
-        !operation ||
-        !argumentsJson ||
-        !purpose ||
-        (status !== "success" && status !== "error") ||
-        !summary ||
-        !content ||
-        !executedAt
-      ) {
-        return [];
-      }
-      return [{
-        requestId,
-        toolId,
-        toolName,
-        operation,
-        argumentsJson,
-        purpose,
-        status,
-        summary,
-        content,
-        reference: trimmedString(item.reference),
-        executedAt,
-      }];
-    });
-  }
-
-  private getLatestInvestigation(ticketId: string): LatestInvestigationDto | null {
-    const row = this.database
-      .prepare(
-        `SELECT id, state, instructions, requested_at, started_at, finished_at,
-                result_json, error
-         FROM investigation_jobs
-         WHERE ticket_id = ?
-         ORDER BY requested_at DESC, rowid DESC
-         LIMIT 1`,
-      )
-      .get(ticketId) as
-      | {
-          id: string;
-          state: InvestigationJobState;
-          instructions: string | null;
-          requested_at: string;
-          started_at: string | null;
-          finished_at: string | null;
-          result_json: string | null;
-          error: string | null;
-        }
-      | undefined;
-    if (!row) {
-      return null;
-    }
-
-    const parsedResult = parseJson<unknown>(row.result_json, null);
-    const result = isRecord(parsedResult) ? parsedResult : null;
-    const suggestedResponse = trimmedString(result?.suggestedResponse);
-    const missingInformation = stringArray(result?.missingInformation);
-    const explicitOutcome = investigationOutcome(result?.outcome);
-    const outcome = explicitOutcome
-      ?? (row.state === "completed"
-        ? missingInformation.length > 0
-          ? "needs_information"
-          : suggestedResponse
-            ? "reply_ready"
-            : "technical_investigation_required"
-        : null);
-    const confidence = result?.confidence;
-    const evidence = Array.isArray(result?.evidence)
-      ? result.evidence.flatMap((item) => {
-          if (!isRecord(item)) {
-            return [];
-          }
-          const source = trimmedString(item.source);
-          const summary = trimmedString(item.summary);
-          if (!source || !summary) {
-            return [];
-          }
-          return [{
-            source,
-            summary,
-            reference: trimmedString(item.reference),
-          }];
-        })
-      : [];
-
-    return {
-      id: row.id,
-      state: row.state,
-      instructions: row.instructions,
-      requestedAt: row.requested_at,
-      startedAt: row.started_at,
-      finishedAt: row.finished_at,
-      error: row.error,
-      outcome,
-      confidence:
-        typeof confidence === "number" &&
-        Number.isFinite(confidence) &&
-        confidence >= 0 &&
-        confidence <= 1
-          ? confidence
-          : null,
-      evidence,
-      missingInformation,
-      nextAction: trimmedString(result?.nextAction),
-      suggestedResponse,
-    };
-  }
-
   private mapSuggestion(row: {
     id: string;
     body: string;
@@ -15131,7 +10843,6 @@ export class SupportStore {
       ticket: row.confirmed_ticket_id
         ? this.getTicketDetail(row.confirmed_ticket_id)
         : null,
-      investigationJobId: null,
     };
   }
 
@@ -15505,7 +11216,6 @@ export class SupportStore {
         action,
         messageIds: messages.map((message) => message.id),
         ticket: null,
-        investigationJobId: null,
       };
     })();
   }

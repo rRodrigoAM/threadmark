@@ -10,13 +10,10 @@ import type {
 import type {
   CategoryCatalogDto,
   CategoryFacet,
-  AddThreadmarkAiMessageInput,
+
   CreateManualTicketInput,
   DeleteTicketResponse,
-  ThreadmarkAiContextDto,
-  DeleteThreadmarkAiThreadResponse,
-  ThreadmarkAiThreadDto,
-  ThreadmarkAiThreadListResponse,
+
   TicketListResponse,
   CreateCategoryInput,
   DeleteCategoryInput,
@@ -30,10 +27,7 @@ import type {
   UpdateTicketInternalNoteInput,
   UpdateTicketMetadataInput,
   UpdateTicketAssigneeInput,
-  DocumentationDraftDto,
-  DocumentationDraftListResponse,
-  DeleteDocumentationDraftResponse,
-  UpdateDocumentationDraftInput,
+
   NotificationListResponse,
   NotificationReadResponse,
 } from "@/shared/contracts";
@@ -54,10 +48,7 @@ import {
   type DashboardDateRange,
 } from "./dashboard-period";
 import { notifySessionExpired } from "./session-events";
-import { configuredApiUrl } from "./desktop";
-
 export const API_URL =
-  configuredApiUrl() ??
   process.env.NEXT_PUBLIC_SUPPORT_API_URL ??
   "http://127.0.0.1:4317";
 
@@ -128,102 +119,6 @@ export async function updateNotificationRead(
 
 export async function markAllNotificationsRead(): Promise<NotificationReadResponse> {
   return request("/api/notifications/read-all", { method: "POST" });
-}
-
-export async function getDocumentationDrafts(options: {
-  query?: string;
-  includeArchived?: boolean;
-} = {}): Promise<DocumentationDraftListResponse> {
-  const params = new URLSearchParams();
-  if (options.query?.trim()) params.set("q", options.query.trim());
-  if (options.includeArchived) params.set("includeArchived", "true");
-  const query = params.toString();
-  return request(`/api/documentation${query ? `?${query}` : ""}`);
-}
-
-export async function queueTicketDocumentation(ticketId: string): Promise<DocumentationDraftDto> {
-  return request(`/api/tickets/${encodeURIComponent(ticketId)}/documentation`, {
-    method: "POST",
-  });
-}
-
-export async function generateKnowledgeDocument(knowledgeId: string): Promise<DocumentationDraftDto> {
-  return request(`/api/knowledge/${encodeURIComponent(knowledgeId)}/documentation`, {
-    method: "POST",
-  });
-}
-
-export async function updateKnowledgeObject(
-  knowledgeId: string,
-  input: import("../../shared/contracts.js").UpdateKnowledgeObjectInput,
-): Promise<import("../../shared/contracts.js").KnowledgeObjectDto> {
-  return request(`/api/knowledge/${encodeURIComponent(knowledgeId)}`, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function reviewKnowledgeObject(
-  knowledgeId: string,
-  input: import("../../shared/contracts.js").KnowledgeReviewFeedbackInput,
-): Promise<import("../../shared/contracts.js").KnowledgeObjectDto> {
-  return request(`/api/knowledge/${encodeURIComponent(knowledgeId)}/review`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function regenerateDocumentation(draftId: string): Promise<DocumentationDraftDto> {
-  return request(`/api/documentation/${encodeURIComponent(draftId)}/regenerate`, {
-    method: "POST",
-  });
-}
-
-export async function updateDocumentationDraft(
-  draftId: string,
-  input: UpdateDocumentationDraftInput,
-): Promise<DocumentationDraftDto> {
-  return request(`/api/documentation/${encodeURIComponent(draftId)}`, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function deleteDocumentationDraft(
-  draftId: string,
-): Promise<DeleteDocumentationDraftResponse> {
-  return request(`/api/documentation/${encodeURIComponent(draftId)}`, {
-    method: "DELETE",
-  });
-}
-
-export async function getDocumentationDocx(
-  draftId: string,
-): Promise<{ blob: Blob; fileName: string }> {
-  let response: Response;
-  try {
-    response = await fetch(
-      `${API_URL}/api/documentation/${encodeURIComponent(draftId)}/export.docx`,
-      {
-        headers: {
-          Accept: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        },
-        credentials: "include",
-        cache: "no-store",
-      },
-    );
-  } catch {
-    throw new ApiError(
-      "Não foi possível alcançar o serviço local para exportar a documentação.",
-    );
-  }
-  if (!response.ok) throw await apiResponseError(response);
-  return {
-    blob: await response.blob(),
-    fileName:
-      contentDispositionFileName(response.headers.get("content-disposition")) ??
-      "documentacao.docx",
-  };
 }
 
 async function apiResponseError(response: Response): Promise<ApiError> {
@@ -718,93 +613,4 @@ export async function updateTicketStatus(
         : {}),
     }),
   });
-}
-
-export async function listThreadmarkAiThreads(): Promise<ThreadmarkAiThreadListResponse> {
-  return request<ThreadmarkAiThreadListResponse>("/api/threadmark-ai/threads");
-}
-
-export async function openCurrentThreadmarkAiThread(
-  context: ThreadmarkAiContextDto | null,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>("/api/threadmark-ai/current", {
-    method: "POST",
-    body: JSON.stringify({ context }),
-  });
-}
-
-export async function createThreadmarkAiThread(
-  context: ThreadmarkAiContextDto | null,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>("/api/threadmark-ai/threads", {
-    method: "POST",
-    body: JSON.stringify({ context }),
-  });
-}
-
-export async function getThreadmarkAiThread(
-  threadId: string,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>(
-    `/api/threadmark-ai/threads/${encodeURIComponent(threadId)}`,
-  );
-}
-
-export async function markThreadmarkAiThreadRead(
-  threadId: string,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>(
-    `/api/threadmark-ai/threads/${encodeURIComponent(threadId)}/read`,
-    { method: "POST" },
-  );
-}
-
-export async function deleteThreadmarkAiThread(
-  threadId: string,
-): Promise<DeleteThreadmarkAiThreadResponse> {
-  return request<DeleteThreadmarkAiThreadResponse>(
-    `/api/threadmark-ai/threads/${encodeURIComponent(threadId)}`,
-    { method: "DELETE" },
-  );
-}
-
-export async function addThreadmarkAiMessage(
-  threadId: string,
-  body: string,
-  clientMessageId: string,
-  context: ThreadmarkAiContextDto | null,
-  attachments: NonNullable<AddThreadmarkAiMessageInput["attachments"]> = [],
-  allowImageAnalysis = false,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>(
-    `/api/threadmark-ai/threads/${encodeURIComponent(threadId)}/messages`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        body: body.trim(),
-        clientMessageId,
-        context,
-        attachments,
-        allowImageAnalysis,
-      }),
-    },
-  );
-}
-
-export async function cancelThreadmarkAiTurn(
-  threadId: string,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>(
-    `/api/threadmark-ai/threads/${encodeURIComponent(threadId)}/cancel`,
-    { method: "POST" },
-  );
-}
-
-export async function retryThreadmarkAiTurn(
-  threadId: string,
-): Promise<ThreadmarkAiThreadDto> {
-  return request<ThreadmarkAiThreadDto>(
-    `/api/threadmark-ai/threads/${encodeURIComponent(threadId)}/retry`,
-    { method: "POST" },
-  );
 }

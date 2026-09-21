@@ -165,14 +165,13 @@ test("catálogo nunca oferece WhatsApp como ação de automação", () => {
   );
 });
 
-test("Intercom nativo fica disponível ao Threadmark AI sem expor uma ação incompleta no editor", () => {
+test("Intercom nativo legado não expõe ação incompleta no editor", () => {
   const catalog = catalogWithConnectedApps([{
     id: "intercom-1",
     type: "intercom",
     name: "Intercom do suporte",
     description: null,
     status: "active",
-    aiEnabled: true,
     secretConfigured: true,
     endpointPreview: "https://api.intercom.io/",
     lastTestAt: null,
@@ -193,7 +192,6 @@ test("catálogo transforma somente ferramentas MCP autorizadas em etapas configu
     name: "Projetos MCP",
     description: null,
     status: "active",
-    aiEnabled: true,
     secretConfigured: true,
     endpointPreview: "https://mcp.example.com/mcp",
     lastTestAt: "2026-08-20T12:00:00.000Z",
@@ -219,7 +217,6 @@ test("catálogo transforma somente ferramentas MCP autorizadas em etapas configu
         idempotentHint: false,
         openWorldHint: true,
       },
-      aiEnabled: true,
       automationEnabled: true,
       confirmationRequired: true,
     }, {
@@ -447,7 +444,6 @@ test("catálogo cria uma ação para cada instância ativa de app conectado", ()
       name: "Alertas do suporte",
       description: null,
       status: "active",
-      aiEnabled: false,
       secretConfigured: true,
       endpointPreview: "https://hooks.slack.com/••••",
       lastTestAt: null,
@@ -460,7 +456,6 @@ test("catálogo cria uma ação para cada instância ativa de app conectado", ()
       name: "API pausada",
       description: null,
       status: "disabled",
-      aiEnabled: false,
       secretConfigured: true,
       endpointPreview: "https://example.com/••••",
       lastTestAt: null,

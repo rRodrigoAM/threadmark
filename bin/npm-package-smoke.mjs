@@ -94,7 +94,7 @@ try {
     cwd: temporary,
     env: {
       ...process.env,
-      SUPPORT_AGENT_ENABLED: "false",
+      SUPPORT_TRIAGE_AI_ENABLED: "false",
       SUPPORT_DATA_DIR: doctorDataDirectory,
       SUPPORT_START_WEB: "false",
       SUPPORT_WHATSAPP_ENABLED: "false",

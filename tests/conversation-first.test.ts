@@ -249,7 +249,8 @@ test("criação confirmada aceita contexto staff e não inicia investigação au
 
   assert.equal(repeated.ticket?.id, created.ticket?.id);
   assert.equal(repeated.blockId, created.blockId);
-  assert.equal(repeated.investigationJobId, created.investigationJobId);
+  assert.equal("investigationJobId" in repeated, false);
+  assert.equal("investigationJobId" in created, false);
   assert.equal(
     (current.database.prepare("SELECT COUNT(*) AS count FROM tickets").get() as { count: number }).count,
     1,
@@ -581,7 +582,7 @@ test("API lista conversa completa paginada e cria ticket em lote", async () => {
     investigationJobId: string | null;
   };
   assert.equal(result.ticket.messageCount, 2);
-  assert.equal(result.investigationJobId, null);
+  assert.equal("investigationJobId" in result, false);
 
   const linkedTickets = await app.request(
     `/api/conversations/${current.groupId}/tickets?limit=1&status=triage`,

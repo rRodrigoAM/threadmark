@@ -6,17 +6,6 @@ import type {
   ClientSummaryDto,
   DashboardResponse,
   DirectorySnapshotDto,
-  DocumentationDraftDto,
-  DocumentationDraftListResponse,
-  KnowledgeObjectDto,
-  KnowledgeReviewFeedbackInput,
-  UpdateKnowledgeObjectInput,
-  InvestigationThreadDto,
-  InvestigationThreadMessageDto,
-  InvestigationThreadSummaryDto,
-  InvestigationThreadTurnDto,
-  ThreadmarkAiContextDto,
-  ThreadmarkAiThreadDto,
   RuntimeStatusDto,
   SuggestionDto,
   TicketDetailDto,
@@ -31,7 +20,6 @@ import type {
   UpdateTicketContextInput,
   UpdateTicketMetadataInput,
   UpdateTicketAssigneeInput,
-  UpdateDocumentationDraftInput,
 } from "../../shared/contracts.js";
 
 export type {
@@ -40,17 +28,6 @@ export type {
   ClientSummaryDto,
   DashboardResponse,
   DirectorySnapshotDto,
-  DocumentationDraftDto,
-  DocumentationDraftListResponse,
-  KnowledgeObjectDto,
-  KnowledgeReviewFeedbackInput,
-  UpdateKnowledgeObjectInput,
-  InvestigationThreadDto,
-  InvestigationThreadMessageDto,
-  InvestigationThreadSummaryDto,
-  InvestigationThreadTurnDto,
-  ThreadmarkAiContextDto,
-  ThreadmarkAiThreadDto,
   RuntimeStatusDto,
   SuggestionDto,
   CategoryCatalogDto,
@@ -66,7 +43,6 @@ export type {
   UpdateTicketContextInput,
   UpdateTicketMetadataInput,
   UpdateTicketAssigneeInput,
-  UpdateDocumentationDraftInput,
 };
 
 export type RuntimeState = RuntimeStatusDto;
@@ -81,5 +57,3 @@ export type TicketCategoryCatalog = CategoryCatalogDto;
 export type CategoryFacetType = CategoryFacet;
 export type Attachment = AttachmentDto;
 export type AnswerSuggestion = SuggestionDto;
-export type DocumentationDraft = DocumentationDraftDto;
-export type KnowledgeObject = KnowledgeObjectDto;

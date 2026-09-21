@@ -34,7 +34,6 @@ test("Intercom exige token e testa conversas, autor e coleções sem executar mu
         type: "intercom",
         name: "Intercom",
         enabled: true,
-        aiEnabled: true,
         endpoint: "https://api.intercom.io/",
       }, "Operador"),
       /access token/i,
@@ -43,7 +42,6 @@ test("Intercom exige token e testa conversas, autor e coleções sem executar mu
       type: "intercom",
       name: "Intercom",
       enabled: true,
-      aiEnabled: true,
       endpoint: "https://api.intercom.io/articles",
       secret: "token-de-teste",
     }, "Operador");
@@ -67,7 +65,7 @@ test("Intercom exige token e testa conversas, autor e coleções sem executar mu
   }
 });
 
-test("MCP remoto descobre ferramentas e exige autorização separada para IA e automações", async () => {
+test("MCP remoto descobre ferramentas e exige autorização para automações", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "threadmark-mcp-app-"));
   const database = createDatabase(":memory:");
   const vault = new LocalSecretVault(path.join(temporary, "secrets"));
@@ -127,7 +125,6 @@ test("MCP remoto descobre ferramentas e exige autorização separada para IA e a
       type: "mcp_remote",
       name: "MCP de tarefas",
       enabled: true,
-      aiEnabled: true,
       endpoint: "https://mcp.example.com/mcp",
       secret: "mcp-secret-token",
     }, "Operador");
@@ -137,24 +134,21 @@ test("MCP remoto descobre ferramentas e exige autorização separada para IA e a
     assert.match(validated.message, /1 ferramenta/i);
     const discovered = service.get(created.id);
     assert.equal(discovered.mcpTools[0]?.name, "create_issue");
-    assert.equal(discovered.mcpTools[0]?.aiEnabled, false);
     assert.equal(discovered.mcpTools[0]?.automationEnabled, false);
     assert.equal(discovered.mcpTools[0]?.confirmationRequired, true);
     assert.doesNotMatch(JSON.stringify(discovered), /mcp-secret-token/);
 
     await assert.rejects(
-      service.callMcpTool(created.id, "create_issue", { title: "Falha" }, "ai"),
+      service.callMcpTool(created.id, "create_issue", { title: "Falha" }),
       /não foi autorizada/i,
     );
     await service.update(created.id, {
       type: "mcp_remote",
       name: "MCP de tarefas",
       enabled: true,
-      aiEnabled: true,
       endpoint: "",
       mcpTools: [{
         name: "create_issue",
-        aiEnabled: true,
         automationEnabled: true,
         confirmationRequired: true,
       }],
@@ -163,7 +157,6 @@ test("MCP remoto descobre ferramentas e exige autorização separada para IA e a
       created.id,
       "create_issue",
       { title: "Erro no dashboard", priority: "high" },
-      "automation",
     );
     assert.deepEqual(result.structuredContent, { id: "ISSUE-42" });
     assert.equal(calls.some((call) => call.method === "tools/list"), true);

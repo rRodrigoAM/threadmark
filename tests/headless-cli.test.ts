@@ -168,13 +168,8 @@ test("CLI headless cria ticket de conversa com JSON validado, idempotência e id
 
 test("CLI headless resolve número humano antes de consultar o ticket exato", async () => {
   const current = recordingTransport((route) => {
-    if (route.startsWith("/api/tickets?")) {
-      return {
-        items: [{ id: "ticket-id-123", number: 123 }],
-        total: 1,
-        limit: 100,
-        offset: 0,
-      };
+    if (route === "/api/tickets/by-number/123") {
+      return { id: "ticket-id-123", number: 123 };
     }
     return { id: "ticket-id-123", number: 123, title: "Falha de envio" };
   });
@@ -188,6 +183,112 @@ test("CLI headless resolve número humano antes de consultar o ticket exato", as
   assert.equal(result.ok, true);
   assert.equal(current.requests.length, 2);
   assert.equal(current.requests[1]!.route, "/api/tickets/ticket-id-123");
+});
+
+test("CLI headless importa mensagens externas em ticket existente", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "threadmark-headless-"));
+  try {
+    const inputPath = path.join(directory, "external-messages.json");
+    const body = {
+      sourceType: "intercom_conversation",
+      sourceConversationId: "215475831157843",
+      messages: [
+        {
+          id: "53434216678",
+          author: "Robson Da Silva",
+          authorRole: "customer",
+          body: "Bom dia, gostaria de ajuda para configurar meu ecommerce.",
+          occurredAt: "2026-09-08T12:35:01.000Z",
+        },
+        {
+          id: "53434401009",
+          author: "Rodrigo",
+          authorRole: "support",
+          body: "Olá, tudo bem?",
+          occurredAt: "2026-09-08T12:37:41.000Z",
+        },
+      ],
+    };
+    await writeFile(inputPath, JSON.stringify(body), { mode: 0o600 });
+    const current = recordingTransport((route) => {
+      if (route === "/api/ticket-assignees") {
+        return [{ id: "user-operator", displayName: "Pessoa Operadora", role: "owner" }];
+      }
+      if (route.startsWith("/api/tickets?")) {
+        return {
+          items: [{ id: "ticket-id-375", number: 375 }],
+          total: 1,
+          limit: 100,
+          offset: 0,
+        };
+      }
+      return { id: "ticket-id-375", number: 375, messageCount: 2 };
+    });
+
+    const result = await executeHeadlessCommand(
+      "tickets",
+      [
+        "external-messages-import",
+        "#375",
+        "--input",
+        "external-messages.json",
+        "--apply",
+        "--as",
+        "Pessoa Operadora",
+        "--client",
+        "hermes",
+      ],
+      current.transport,
+      { invocationCwd: directory },
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(current.requests[2], {
+      route: "/api/tickets/ticket-id-375/external-messages",
+      input: {
+        method: "POST",
+        actorId: "user-operator",
+        clientId: "hermes",
+        body,
+      },
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("CLI headless remove nota interna de um ticket com auditoria", async () => {
+  const current = recordingTransport((route) => {
+    if (route === "/api/ticket-assignees") {
+      return [{ id: "user-operator", displayName: "Pessoa Operadora", role: "owner" }];
+    }
+    return { id: "ticket-id-375", number: 375 };
+  });
+
+  const result = await executeHeadlessCommand(
+    "tickets",
+    [
+      "note-delete",
+      "ticket-id-375",
+      "ticket-note-incorrect",
+      "--apply",
+      "--as",
+      "Pessoa Operadora",
+      "--client",
+      "hermes",
+    ],
+    current.transport,
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(current.requests[1], {
+    route: "/api/tickets/ticket-id-375/notes/ticket-note-incorrect",
+    input: {
+      method: "DELETE",
+      actorId: "user-operator",
+      clientId: "hermes",
+    },
+  });
 });
 
 test("CLI headless expõe a fila de triagem sem alterar estado", async () => {

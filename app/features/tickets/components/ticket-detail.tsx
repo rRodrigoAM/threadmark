@@ -2,7 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  BookOpenText,
+
   Bug,
   CheckCircle2,
   LoaderCircle,
@@ -119,8 +119,7 @@ type TicketDetailProps = {
     ticketId: string,
     assigneeId: string | null,
   ) => Promise<boolean>;
-  generatingDocumentation?: boolean;
-  onGenerateDocumentation?: (ticketId: string) => void;
+
 };
 
 export function TicketDetail({
@@ -155,8 +154,7 @@ export function TicketDetail({
   categoryMutationTicketId,
   canManageCategories,
   onOpenCategoryCatalog,
-  generatingDocumentation,
-  onGenerateDocumentation,
+
 }: TicketDetailProps) {
   const [metadataEditorOpen, setMetadataEditorOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -554,35 +552,7 @@ export function TicketDetail({
               Contexto sincronizado até {formatMessageTime(ticket.lastMessageAt)}
             </div>
             {ticket.resolution ? <TicketResolutionSummary ticket={ticket} /> : null}
-            {ticket.resolution && ticket.knowledgeObject ? (
-              <div className="mx-5 mt-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">Conhecimento identificado</p>
-                    <p className="mt-1 break-words text-sm font-semibold">{ticket.knowledgeObject.title || "Extração em andamento"}</p>
-                    {ticket.knowledgeObject.problem ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{ticket.knowledgeObject.problem}</p> : null}
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                      <Badge variant="secondary">{ticket.knowledgeObject.confidence}</Badge>
-                      <Badge variant="outline">{ticket.knowledgeObject.suggestedType}</Badge>
-                      <Badge variant="outline">{ticket.knowledgeObject.audience}</Badge>
-                      <Badge variant={ticket.knowledgeObject.candidate === "YES" ? "default" : "secondary"}>Reutilizável: {ticket.knowledgeObject.candidate}</Badge>
-                    </div>
-                  </div>
-                  {onGenerateDocumentation ? <Button disabled={generatingDocumentation} onClick={() => onGenerateDocumentation(ticket.id)} size="sm" variant="outline">
-                    {generatingDocumentation ? <LoaderCircle className="animate-spin" size={14} /> : <RefreshCw size={14} />}
-                    Extrair novamente
-                  </Button> : null}
-                </div>
-              </div>
-            ) : null}
-            {ticket.resolution && !ticket.knowledgeObject && onGenerateDocumentation ? (
-              <div className="mx-5 mt-3 flex justify-end">
-                <Button disabled={generatingDocumentation} onClick={() => onGenerateDocumentation(ticket.id)} size="sm" variant="outline">
-                  {generatingDocumentation ? <LoaderCircle className="animate-spin" size={14} /> : <BookOpenText size={14} />}
-                  Gerar conhecimento
-                </Button>
-              </div>
-            ) : null}
+
           </div>
           {canManageNotes ? (
             <TicketNoteComposer

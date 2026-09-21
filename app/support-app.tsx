@@ -51,7 +51,7 @@ import {
   type NotificationDto,
 } from "@/shared/contracts";
 import { activeStatuses, configureSupportTimeZone, statusLabels } from "./lib/format";
-import { isInvestigationActive } from "./lib/investigation";
+
 import {
   handleSupportSearchShortcut,
   isSupportSearchShortcut,
@@ -186,7 +186,6 @@ type ToastState = {
   message: string;
 } | null;
 
-const ACTIVE_TICKET_POLL_INTERVAL_MS = 3_000;
 const IDLE_TICKET_POLL_INTERVAL_MS = 5_000;
 const MAX_TICKET_POLL_INTERVAL_MS = 30_000;
 const TICKET_LIST_SNAPSHOT_KEY = "ticket-list";
@@ -672,12 +671,8 @@ export function SupportApp({
     const scheduleNextPoll = () => {
       clearScheduledPoll();
       if (cancelled || document.visibilityState !== "visible") return;
-      const current = ticketDetailsRef.current.get(ticketId);
-      const baseInterval = isInvestigationActive(current?.latestInvestigation ?? null)
-        ? ACTIVE_TICKET_POLL_INTERVAL_MS
-        : IDLE_TICKET_POLL_INTERVAL_MS;
       const interval = Math.min(
-        baseInterval * 2 ** transientFailures,
+        IDLE_TICKET_POLL_INTERVAL_MS * 2 ** transientFailures,
         MAX_TICKET_POLL_INTERVAL_MS,
       );
       timer = window.setTimeout(() => void pollTicket(), interval);

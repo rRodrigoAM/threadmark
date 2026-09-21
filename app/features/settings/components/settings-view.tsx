@@ -1,7 +1,7 @@
 "use client";
 
-import { Database, HardDrive, Laptop, LoaderCircle, Menu, QrCode, RefreshCw, Settings2, ShieldCheck, UserRound, UsersRound, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { Database, HardDrive, LoaderCircle, Menu, QrCode, RefreshCw, Settings2, ShieldCheck, UserRound, UsersRound, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { getSettingsUsers, getStaffSettings, getWhatsappQr, getWhatsappRuntime, getWorkspaceSettings, type SettingsRole, type SettingsUser, type StaffSettings, type WhatsappQrState, type WorkspaceSettings } from "@/app/lib/settings";
 import type { RuntimeState } from "@/app/lib/types";
 import type { SettingsRouteTab } from "@/app/lib/navigation";
@@ -14,8 +14,6 @@ import { StaffSection } from "./sections/staff-section";
 import { WhatsappSection } from "./sections/whatsapp-section";
 import { DataSection } from "./sections/data-section";
 import { SecuritySection } from "./sections/security-section";
-import { DesktopSection } from "./sections/desktop-section";
-import { getThreadmarkDesktopBridge } from "@/app/lib/desktop";
 import {
   EMPTY_STAFF,
   Notice,
@@ -45,11 +43,8 @@ const TABS: TabDefinition[] = [
   { id: "staff", label: "Equipe WhatsApp", icon: UserRound },
   { id: "whatsapp", label: "WhatsApp", icon: QrCode },
   { id: "data", label: "Dados", icon: Database },
-  { id: "desktop", label: "Aplicativo", icon: Laptop },
   { id: "security", label: "Segurança", icon: ShieldCheck },
 ];
-
-const subscribeToDesktopBridge = () => () => undefined;
 
 export function SettingsView({
   currentUserId,
@@ -78,16 +73,7 @@ export function SettingsView({
     tone: "success" | "error";
     message: string;
   } | null>(null);
-  const desktopAvailable = useSyncExternalStore(
-    subscribeToDesktopBridge,
-    () => Boolean(getThreadmarkDesktopBridge()),
-    () => false,
-  );
-
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
-  const visibleTabs = desktopAvailable
-    ? TABS
-    : TABS.filter((tab) => tab.id !== "desktop");
 
   const load = useCallback(
     async (silent = false) => {
@@ -230,7 +216,7 @@ export function SettingsView({
             aria-label="Seções das configurações"
             className="mx-auto flex h-auto max-w-[1180px] justify-start gap-1 overflow-x-auto overflow-y-hidden rounded-none bg-transparent py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {visibleTabs.map((tab) => {
+            {TABS.map((tab) => {
               const Icon = tab.icon;
               return (
                 <TabsTrigger
@@ -317,9 +303,6 @@ export function SettingsView({
           ) : null}
           {activeTab === "data" ? (
             <DataSection canManage={canManage} onFeedback={showFeedback} />
-          ) : null}
-          {activeTab === "desktop" ? (
-            <DesktopSection canManage={canManage} onFeedback={showFeedback} />
           ) : null}
           {activeTab === "security" ? (
             <SecuritySection

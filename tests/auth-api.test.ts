@@ -4,13 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { AiProviderSettingsService } from "../server/agent/provider-settings.js";
+
 import { LocalAuthService, SetupChallengeService } from "../server/auth/index.js";
 import { LocalAccessToken } from "../server/auth/local-access-token.js";
 import { createDatabase } from "../server/db/index.js";
 import { SupportStore } from "../server/domain/index.js";
 import { createApiApp } from "../server/index.js";
-import { LocalSecretVault } from "../server/runtime/secret-vault.js";
+
 import { LocalSettingsFile } from "../server/runtime/local-settings.js";
 
 test("API sem serviço de autenticação falha fechada", async () => {
@@ -51,10 +51,6 @@ test("API exige sessão, conclui bootstrap e aplica papéis sem confiar no naveg
       setupChallenges: challenges,
       localAccessToken,
       localSettings,
-      aiSettings: new AiProviderSettingsService(
-        database,
-        new LocalSecretVault(path.join(root, "secrets")),
-      ),
     });
 
     const denied = await app.request("/api/runtime");
@@ -209,10 +205,6 @@ test("API atribui mutações da CLI ao usuário delegado sem confiar em nomes li
       setupChallenges: challenges,
       localAccessToken,
       localSettings: new LocalSettingsFile(path.join(root, "settings.json")),
-      aiSettings: new AiProviderSettingsService(
-        database,
-        new LocalSecretVault(path.join(root, "secrets")),
-      ),
     });
     const challenge = challenges.issue();
     const setup = await app.request("/api/setup/complete", {

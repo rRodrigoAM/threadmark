@@ -676,13 +676,13 @@ test("API persiste rascunho incompleto e nunca devolve segredo de app", async ()
         type: "slack_webhook",
         name: "Slack do suporte",
         enabled: true,
-        aiEnabled: true,
+        aiEnabled: true, // Accepted from legacy clients, never exposed or authorized.
         endpoint: "https://hooks.slack.com/services/example/example/example",
       },
       "Teste",
     );
     assert.equal(app.secretConfigured, true);
-    assert.equal(app.aiEnabled, true);
+    assert.equal("aiEnabled" in app, false);
     assert.equal("endpoint" in app, false);
     assert.doesNotMatch(JSON.stringify(current.api.listConnectedApps()), /services\/example/);
 
@@ -697,7 +697,7 @@ test("API persiste rascunho incompleto e nunca devolve segredo de app", async ()
       "Teste",
     );
     assert.equal(updated.status, "disabled");
-    assert.equal(updated.aiEnabled, true, "atualização antiga preserva a autorização da IA");
+    assert.equal("aiEnabled" in updated, false);
     assert.equal(updated.secretConfigured, true);
   } finally {
     await current.close();
@@ -760,7 +760,6 @@ test("automação executa somente uma ferramenta MCP descoberta e autorizada", a
       type: "mcp_remote",
       name: "Projetos MCP",
       enabled: true,
-      aiEnabled: true,
       endpoint: "https://mcp.example.com/mcp",
     }, "Teste");
     await connectedApps.validateConnection(app.id);
@@ -768,11 +767,9 @@ test("automação executa somente uma ferramenta MCP descoberta e autorizada", a
       type: "mcp_remote",
       name: "Projetos MCP",
       enabled: true,
-      aiEnabled: true,
       endpoint: "",
       mcpTools: [{
         name: "create_issue",
-        aiEnabled: true,
         automationEnabled: true,
         confirmationRequired: false,
       }],
