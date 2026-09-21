@@ -12,8 +12,8 @@ WhatsApp / Baileys (somente entrada)
       -> tickets como recortes explícitos
       -> Kanban, métricas e automações internas
 
-Threadmark Web/Desktop
-  -> API local
+Threadmark Web
+  -> API privada no mesmo runtime
   -> revisão visual, separação de assuntos e operação do suporte
 
 Hermes / modelo / skills
@@ -23,27 +23,15 @@ Hermes / modelo / skills
   -> Git, Linear, AWS, bancos readonly e outras ferramentas do agente
 ```
 
-## Processos locais
+## Processos
 
-- Web UI: `http://127.0.0.1:3000`.
-- API: `http://127.0.0.1:4317` por padrão.
+- Web UI: `http://127.0.0.1:3000` pelo código-fonte ou porta `3000` do container.
+- API: `http://127.0.0.1:4317`; no container, a Web encaminha `/api/*` e `/health` para essa porta privada.
 - Daemon: captura, heartbeat, scheduler, transcrição local opcional e automações internas.
 - CLI: fachada de domínio versionada para operação humana e agentes externos.
-- Desktop: abre a Web UI em um renderer isolado e inicia ou reutiliza o daemon local.
-- Executor de triagem: interno por compatibilidade ou externo com `SUPPORT_AGENT_EXECUTOR=hermes`.
+- Executor semântico de triagem: Hermes externo pela CLI; `SUPPORT_TRIAGE_AI_ENABLED=false` mantém o classificador determinístico local.
 
-Todos os listeners usam loopback por padrão. Expor a API em outra interface muda o modelo de ameaça e exige autenticação e proteção de rede próprias.
-
-## Shell desktop e workspaces
-
-O Electron contém apenas janela, ciclo de vida da interface e escolha do workspace. React, shadcn/ui e Tailwind permanecem no renderer. Ele opera com `nodeIntegration: false`, `contextIsolation: true`, sandbox habilitado, permissões negadas por padrão e navegação limitada à origem do workspace.
-
-O perfil fica em `desktop-workspace.json`, fora do SQLite e com permissão privada:
-
-1. `local`: inicia ou reutiliza `threadmark on` e acessa `127.0.0.1`;
-2. `remote`: não inicia o daemon local e carrega uma origem HTTPS previamente configurada.
-
-Trocar o perfil não move nem remove dados. A edição hospedada ainda exige uma implantação compatível, autenticação remota, TLS e migração controlada.
+Pelo código-fonte, os listeners usam loopback por padrão. No container, somente a Web aceita conexões em `0.0.0.0`; a API continua em loopback e é acessada pelo proxy same-origin da Web. `SUPPORT_PUBLIC_ORIGIN` define a origem HTTPS aceita para CORS, CSRF e cookies.
 
 ## Persistência
 
@@ -73,7 +61,7 @@ O envelope JSON `threadmark.headless.v1` permite que Hermes e outros agentes use
 
 Toda escrita headless resolve `--as` para um usuário ativo do workspace. O ator persistido identifica a pessoa e o cliente executor. A API aplica as mesmas permissões usadas pela interface.
 
-Os endpoints privados de execução externa aceitam somente a identidade de agente esperada. Claim, heartbeat e conclusão de triagem são auditáveis e usam lease; um job abandonado pode ser recuperado sem concorrência entre o executor interno e o externo.
+Os endpoints privados de execução externa aceitam somente a identidade de agente esperada. Claim, heartbeat e conclusão de triagem são auditáveis e usam lease; um job abandonado pode ser recuperado sem um executor interno de modelos concorrente.
 
 ## Fronteira inbound-only
 
@@ -169,7 +157,7 @@ O dashboard usa o mesmo período e filtro de responsável na visão e no CSV. O 
 
 ## Compatibilidade legada
 
-O código ainda preserva o executor interno, históricos de Threadmark AI, objetos de conhecimento, rascunhos de documentação e registros de ferramentas/apps para recuperação e migração sem perda de dados. Essas superfícies não aparecem na navegação nova e não são o caminho recomendado.
+O runtime Threadmark AI foi aposentado: não há chat, provider router, Codex interno, tool bridge, investigation workers ou endpoints exclusivos. Migrações históricas e tabelas antigas permanecem inertes para upgrades e recuperação. Tickets já existentes continuam operacionais. Nenhum dado histórico é descartado por esta remoção; um descarte exigirá decisão separada, backup e migração explícita. `/documentation` e seções antigas de configurações são apenas compatibilidade de navegação.
 
 A remoção física futura exige backup, migração explícita e validação de que nenhuma instalação ainda depende desses registros. Compatibilidade de leitura não concede ao Hermes acesso a segredos antigos.
 

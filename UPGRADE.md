@@ -1,61 +1,43 @@
-# Atualização e desinstalação
+# Atualização, rollback e remoção
 
-Threadmark pode ser instalado pelo DMG da Developer Preview ou executado a partir do código-fonte. O aplicativo e os dados locais ficam separados: substituir `/Applications/Threadmark.app` não remove o workspace armazenado em `~/Library/Application Support/Threadmark`.
+Threadmark pode rodar em um container stateful no Coolify ou diretamente pelo código-fonte. Em ambos os casos, aplicação e dados ficam separados: substituir a imagem ou atualizar o clone não remove o conteúdo de `SUPPORT_DATA_DIR`.
 
 ## Antes de atualizar
 
-1. Confirme a saúde atual em **Configurações → Dados** ou, numa instalação pelo código-fonte:
-
-   ```bash
-   threadmark doctor
-   ```
-
-2. Crie um backup completo pela mesma tela ou pela CLI e valide o resultado:
+1. Confirme que `GET /health` responde e que o workspace abre normalmente.
+2. Crie um backup completo em **Configurações → Dados** ou pela CLI e valide o resultado:
 
    ```bash
    threadmark backup --full
    threadmark backups list
    ```
 
-3. No aplicativo, escolha **Threadmark → Encerrar aplicativo e serviço local…**. Essa opção interrompe a captura, as automações e os jobs antes da troca do `.app`. Na instalação pelo código-fonte, use:
+3. Confirme que existe apenas uma réplica e que o deploy não sobrepõe a instância antiga com a nova.
 
-   ```bash
-   threadmark off
-   ```
+O backup integrado inclui SQLite, configurações não secretas e, no modo completo, anexos. Ele não inclui sessão do WhatsApp, chaves externas nem credenciais de ferramentas. O cache dos modelos locais de transcrição também não entra no backup.
 
-O backup integrado inclui SQLite, configurações não secretas e, no modo completo, anexos. Ele não inclui sessão do WhatsApp, chaves de IA nem credenciais de ferramentas.
+## Aposentadoria do Threadmark AI
 
-O cache dos modelos locais de transcrição também não entra no backup. As transcrições já salvas permanecem no SQLite, mas o modelo precisa ser baixado novamente em outra máquina.
+O chat, executor Codex interno, providers, ferramentas locais e endpoints exclusivos foram removidos. A triagem semântica agora depende do Hermes pela CLI headless; sem um consumidor externo, os jobs aguardam. Use `SUPPORT_TRIAGE_AI_ENABLED=false` apenas para escolher o classificador determinístico local. As opções `SUPPORT_AGENT_EXECUTOR`, `SUPPORT_AGENT_ENABLED`, `SUPPORT_AGENT_CONCURRENCY` e `SUPPORT_CODEX_MCP_TOOL_LOOP_ENABLED` não selecionam mais um executor.
 
-## Atualizar o aplicativo
+Esta atualização não descarta tabelas nem conversas históricas. Migrações antigas permanecem para abrir e atualizar bancos existentes; tickets criados anteriormente continuam operacionais. Não é necessária uma migração destrutiva para aposentar o runtime. Qualquer remoção física dos dados deve ser uma operação separada, explicitamente autorizada e precedida por backup validado.
 
-1. Baixe o novo DMG e o arquivo `.sha256` na [release oficial](https://github.com/weslemvitor/threadmark/releases).
-2. Valide os arquivos na mesma pasta, substituindo o nome pela versão baixada:
+## Atualizar no Coolify
 
-   ```bash
-   shasum -a 256 -c Threadmark-0.3.1-arm64.dmg.sha256
-   ```
+1. Faça o deploy da nova revisão usando o mesmo volume em `/app/data`.
+2. Interrompa a instância antiga antes de iniciar a nova; duas instâncias não podem abrir o mesmo SQLite nem compartilhar a mesma sessão do WhatsApp.
+3. Aguarde o health check em `/health`.
+4. Confirme login, tickets, anexos, automações, workers e conexão do WhatsApp.
+5. Verifique os logs de migração antes de considerar a atualização concluída.
 
-3. Execute **Threadmark → Encerrar aplicativo e serviço local…** na versão atual.
-4. Abra o DMG e substitua `Threadmark.app` em **Aplicativos**.
-5. Como a Developer Preview ainda não é assinada, remova a quarentena apenas depois de validar a origem e o checksum:
-
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/Threadmark.app"
-   open -a Threadmark
-   ```
-
-6. Confirme o login, a captura e a saúde do workspace. Migrações pendentes são aplicadas ao primeiro início e criam um snapshot versionado do SQLite antes de alterar o banco.
-
-Não existe atualização automática nesta fase. O download e a substituição do aplicativo são sempre explícitos.
+Migrações pendentes são aplicadas no primeiro início e criam um snapshot versionado do SQLite antes da alteração. Não interrompa essa inicialização.
 
 ## Atualizar uma instalação pelo código-fonte
-
-A versão `0.3.x` não é publicada no registro npm. `npm link` cria o comando global `threadmark` apontando para o clone local; não mova nem apague esse diretório enquanto quiser usar o comando.
 
 No diretório do repositório:
 
 ```bash
+threadmark off
 git pull --ff-only
 npm ci
 npm run build
@@ -64,41 +46,33 @@ threadmark on
 threadmark doctor
 ```
 
-Na primeira inicialização após uma atualização, migrações pendentes são aplicadas ao SQLite. Antes de migrar, o Threadmark cria automaticamente um snapshot versionado do banco. Não interrompa a inicialização durante essa etapa.
-
-Consulte o [CHANGELOG.md](CHANGELOG.md) antes de atualizar para identificar mudanças de comportamento, requisitos ou procedimentos adicionais.
+Revise o histórico de commits e as mudanças de schema antes de atualizar.
 
 ## Reverter uma atualização
 
-Se uma atualização do aplicativo falhar, encerre o serviço, substitua o `.app` pela versão anterior obtida na release oficial e abra novamente. Se a falha ocorreu depois de alterar o banco, restaure o backup ou snapshot pré-migração pela interface.
+1. Pare completamente o Threadmark.
+2. Localize e valide o backup completo ou pré-migração.
+3. Restaure o backup compatível com a versão anterior.
+4. Volte para a imagem ou tag conhecida.
+5. Inicie uma única instância e valide saúde, login, SQLite, anexos e WhatsApp.
 
-Para uma instalação pelo código-fonte:
+Não tente reverter migrações editando o SQLite manualmente. Reutilizar uma imagem anterior sobre um banco já migrado não é um rollback seguro sem compatibilidade explícita.
 
-1. Pare o Threadmark com `threadmark off`.
-2. Localize o backup completo ou pré-migração com `threadmark backups list`.
-3. Restaure o backup com `threadmark restore <id>`.
-4. Volte para a tag anterior conhecida com `git checkout <tag-anterior>`.
-5. Execute `npm ci`, `npm run build`, `npm link` e `threadmark on`.
-6. Confirme o resultado com `threadmark doctor`.
+## Snapshot para migração
 
-Não tente reverter migrações editando o SQLite manualmente.
+Um snapshot parado do diretório inteiro preserva também sessão do WhatsApp e cofre local e, por isso, é altamente sensível.
 
-## Snapshot manual para mudança de máquina
+1. Pare a instalação de origem.
+2. Confirme o caminho efetivo de `SUPPORT_DATA_DIR`.
+3. Copie o diretório inteiro para um destino criptografado, preservando permissões e arquivos ocultos.
+4. Restaure em `/app/data` com o container parado.
+5. Inicie somente uma instância e valide o resultado.
 
-Um snapshot manual do `SUPPORT_DATA_DIR` parado pode preservar também a sessão do WhatsApp e o cofre local. Isso o torna muito mais sensível que o backup integrado.
+Não copie apenas `threadmark.sqlite`: banco, WAL/SHM, anexos, auth e arquivos auxiliares formam a fronteira de persistência.
 
-1. Execute `threadmark off`.
-2. Confirme o caminho configurado em `SUPPORT_DATA_DIR`.
-3. Copie o diretório inteiro para um destino criptografado e com acesso restrito.
-4. Restaure e teste em uma máquina controlada antes de descartar a origem.
+## Remover preservando dados
 
-O arquivo de chave e o conteúdo cifrado do cofre ficam nessa cópia. Não envie o snapshot a issues, serviços de arquivos sem criptografia ou pessoas não autorizadas.
-
-## Desinstalar preservando dados
-
-No aplicativo, use **Threadmark → Encerrar aplicativo e serviço local…** e mova `Threadmark.app` para o Lixo. O workspace em `~/Library/Application Support/Threadmark` permanece intacto.
-
-Numa instalação pelo código-fonte:
+No Coolify, remova a aplicação sem remover o volume persistente. Pelo código-fonte:
 
 ```bash
 threadmark off
@@ -106,8 +80,8 @@ threadmark service uninstall
 npm unlink --global threadmark
 ```
 
-`threadmark service uninstall` é aplicável apenas quando o LaunchAgent opcional foi instalado no macOS. Os comandos não removem o clone nem o `SUPPORT_DATA_DIR`. Guarde um backup validado antes de mover ou apagar qualquer um deles.
+O LaunchAgent é opcional e exclusivo da instalação local no macOS. Esses comandos não removem o clone nem `SUPPORT_DATA_DIR`.
 
-## Apagar a instalação e os dados
+## Apagar instalação e dados
 
-Depois de desinstalar o comando, confirme o caminho exato de `SUPPORT_DATA_DIR`, verifique se existe alguma obrigação de retenção e remova manualmente o clone, o diretório de dados e os backups externos que também devam ser eliminados. Essa ação apaga mensagens, anexos, sessão do WhatsApp, credenciais locais e auditoria e não pode ser desfeita sem backup.
+Exclua o volume ou diretório de dados somente após confirmar retenção, backup e escopo. A remoção apaga mensagens, anexos, sessão do WhatsApp, credenciais locais e auditoria e não pode ser desfeita sem backup válido.

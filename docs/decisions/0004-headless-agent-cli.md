@@ -42,7 +42,7 @@ Threadmark Web/Desktop
 - Entradas grandes ou com conteúdo de atendimento usam arquivo privado ou stdin, evitando segredos e dados pessoais em argumentos de processo.
 - Repetições de criação usam `clientRequestId` estável.
 - WhatsApp outbound não existe na CLI nem na API.
-- A fila de triagem externa usa claim atômico, lease renovável e conclusão validada pelo mesmo schema do domínio. O executor interno é desligado com `SUPPORT_AGENT_EXECUTOR=hermes`, evitando corrida entre agentes.
+- A fila de triagem externa usa claim atômico, lease renovável e conclusão validada pelo mesmo schema do domínio. O executor interno foi removido; o Hermes é o consumidor externo dessa fila.
 
 ### Conhecimento e configuração
 
@@ -62,8 +62,8 @@ Threadmark Web/Desktop
 1. Publicar e validar a CLI headless, migrando primeiro as operações de ticket já usadas pelo Hermes.
 2. Fazer a triagem automática produzir rascunhos revisáveis por meio do executor externo, usando `agent triage-status`, `triage-claim`, `triage-heartbeat` e `triage-complete`.
 3. Migrar investigações, apps e automações agentic para o Hermes, mantendo no Threadmark apenas regras internas determinísticas.
-4. Ocultar as telas antigas de IA, Ferramentas, Apps, Documentações e Threadmark AI depois da equivalência. Concluído sem apagar os registros legados.
-5. Criar backup local e remover dados legados de documentação somente numa migração explícita e reversível.
+4. Remover as telas, endpoints e runtime exclusivos de IA, Ferramentas, Documentações e Threadmark AI. Concluído sem apagar os registros legados; automações genéricas permanecem.
+5. Preservar migrações e dados legados inertes. Qualquer descarte futuro exige autorização separada e backup validado.
 
 ## Consequências
 
@@ -71,4 +71,4 @@ Threadmark Web/Desktop
 - O Hermes pode operar o mesmo backend local agora e uma API hospedada no futuro.
 - Conhecimento específico de uma organização deixa de influenciar clones públicos do Threadmark.
 - Confirmações acontecem no Hermes; a CLI ainda exige um sinal mecânico de aplicação e identidade auditável.
-- Durante a transição, dados e endpoints legados permanecem para compatibilidade e recuperação, mas as superfícies antigas não aparecem na interface operacional.
+- Dados e migrações históricos permanecem para compatibilidade e recuperação. Os endpoints e executores do produto aposentado foram removidos.

@@ -37,28 +37,28 @@ mas não é persistido, não chama conectores e não altera tickets.
 
 - `GET /api/automation-apps` — lista conexões sem devolver segredos
 - `POST /api/automation-apps` — cria Intercom nativo, Slack, API personalizada ou servidor MCP remoto
-- `PATCH /api/automation-apps/:id` — atualiza configuração e a autorização explícita `aiEnabled`; segredo vazio mantém o atual
+- `PATCH /api/automation-apps/:id` — atualiza configuração e permissões de automação; segredo vazio mantém o atual
 - `POST /api/automation-apps/:id/test` — testa sem revelar a credencial
 - `DELETE /api/automation-apps/:id` — remove após validação de vínculos
 
 `ConnectedAppSummary` devolve apenas `secretConfigured` e um
 `endpointPreview` mascarado. Tokens, webhooks completos e headers secretos
 nunca fazem parte de respostas HTTP, logs ou estado persistido do frontend.
-Somente conexões ativas com `aiEnabled: true` entram no catálogo do Threadmark
-AI; essa autorização pode ser revogada sem excluir a conexão.
+O catálogo do Threadmark AI foi removido. Campos legados de autorização de IA
+não são expostos pela API nem concedem autorização às automações.
 
 Servidores MCP remotos usam Streamable HTTP. Ao salvar ou testar, o backend
 executa `tools/list`, persiste no SQLite apenas o catálogo sanitizado e mantém
-o bearer token no cofre local. Cada ferramenta começa bloqueada e recebe três
-permissões independentes: Threadmark AI, automações e exigência de confirmação.
+o bearer token no cofre local. Cada ferramenta começa bloqueada e exige
+autorização para automações; a exigência de confirmação é configurada separadamente.
 O editor cria um nó para cada ferramenta autorizada em automações e transforma
 seu JSON Schema em campos configuráveis. Ferramentas que exigem confirmação só
 permitem ativar o fluxo quando existe uma etapa de aprovação anterior.
 
-O conector nativo do Intercom continua disponível ao Threadmark AI. Ele aparece
-no catálogo como conexão de chat, mas não promete uma etapa automática; para
-automatizar ferramentas do Intercom, o workspace conecta um servidor MCP
-compatível e escolhe explicitamente as operações liberadas.
+Conexões nativas antigas do Intercom permanecem compatíveis com o armazenamento,
+mas não oferecem uma ação no motor de automações nem um agente de chat. Para
+automatizar ferramentas do Intercom, use um servidor MCP compatível com
+permissões explícitas por operação.
 
 O WhatsApp não é exposto como ação neste catálogo.
 
