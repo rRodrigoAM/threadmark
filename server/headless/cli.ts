@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import { z } from "zod";
 
@@ -25,7 +26,7 @@ const HEADLESS_COMMANDS = new Set([
   "triage",
 ]);
 
-const MAX_INPUT_BYTES = 64 * 1024;
+export const HEADLESS_MAX_INPUT_BYTES = 64 * 1024;
 const MAX_LIMIT = 200;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -868,15 +869,15 @@ async function readInput(
     throw usageError("Informe um JSON com --input <arquivo> ou --input - para stdin.");
   }
   const content = inputPath === "-"
-    ? await readStandardInput()
+    ? await readHeadlessStandardInput()
     : await readFile(
         path.resolve(options.invocationCwd ?? process.cwd(), inputPath),
         "utf8",
       );
-  if (Buffer.byteLength(content, "utf8") > MAX_INPUT_BYTES) {
+  if (Buffer.byteLength(content, "utf8") > HEADLESS_MAX_INPUT_BYTES) {
     throw new HeadlessCliError(
       "input_too_large",
-      `O JSON de entrada deve ter no máximo ${MAX_INPUT_BYTES} bytes.`,
+      `O JSON de entrada deve ter no máximo ${HEADLESS_MAX_INPUT_BYTES} bytes.`,
     );
   }
   try {
@@ -886,18 +887,24 @@ async function readInput(
   }
 }
 
-async function readStandardInput(): Promise<string> {
+export async function readHeadlessStandardInput(
+  input: AsyncIterable<Buffer | string> = process.stdin,
+): Promise<string> {
   let content = "";
-  for await (const chunk of process.stdin) {
-    content += String(chunk);
-    if (Buffer.byteLength(content, "utf8") > MAX_INPUT_BYTES) {
+  let bytes = 0;
+  const decoder = new StringDecoder("utf8");
+  for await (const chunk of input) {
+    const encoded = Buffer.from(chunk);
+    bytes += encoded.byteLength;
+    if (bytes > HEADLESS_MAX_INPUT_BYTES) {
       throw new HeadlessCliError(
         "input_too_large",
-        `O JSON de entrada deve ter no máximo ${MAX_INPUT_BYTES} bytes.`,
+        `O JSON de entrada deve ter no máximo ${HEADLESS_MAX_INPUT_BYTES} bytes.`,
       );
     }
+    content += decoder.write(encoded);
   }
-  return content;
+  return `${content}${decoder.end()}`;
 }
 
 function parseArguments(args: string[]): ParsedArguments {

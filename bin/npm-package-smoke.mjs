@@ -110,8 +110,25 @@ try {
     throw new Error("A CLI instalada não exibiu a ajuda ao ser executada sem argumentos.");
   }
 
+  const remoteHome = path.join(temporary, "remote-home");
+  const remoteList = await run(executable, ["remote", "list", "--json"], {
+    cwd: temporary,
+    env: {
+      ...process.env,
+      HOME: remoteHome,
+      XDG_CONFIG_HOME: path.join(remoteHome, ".config"),
+      THREADMARK_REMOTE_CONFIG_PATH: path.join(remoteHome, ".config", "threadmark", "remotes.json"),
+      SUPPORT_DATA_DIR: forbiddenPackageDataDirectory,
+    },
+  });
+  const remoteReport = JSON.parse(remoteList.stdout);
+  if (remoteReport.ok !== true || !Array.isArray(remoteReport.remotes) || remoteReport.remotes.length !== 0) {
+    throw new Error("A CLI instalada não conseguiu listar o cadastro remoto vazio e isolado.");
+  }
+  await assertMissing(forbiddenPackageDataDirectory);
+
   console.log(
-    `Pacote ${metadata.name}@${metadata.version} validado: instalação sem devDependencies, versão e Doctor funcionais.`,
+    `Pacote ${metadata.name}@${metadata.version} validado: instalação sem devDependencies, versão, Doctor e cadastro remoto funcionais.`,
   );
 } finally {
   await rm(temporary, { force: true, recursive: true });

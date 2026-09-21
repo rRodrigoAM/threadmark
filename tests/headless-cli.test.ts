@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   executeHeadlessCommand,
   HEADLESS_SCHEMA_VERSION,
+  readHeadlessStandardInput,
   type HeadlessRequest,
   type HeadlessTransport,
 } from "../server/headless/cli.js";
@@ -30,6 +31,17 @@ function recordingTransport(
     },
   };
 }
+
+test("CLI headless recompõe UTF-8 dividido na entrada padrão", async () => {
+  async function* chunks(): AsyncGenerator<Buffer> {
+    yield Buffer.from('{"summary":"Ol');
+    yield Buffer.from([0xC3]);
+    yield Buffer.from([0xA1, 0x20, 0xF0, 0x9F]);
+    yield Buffer.from([0x8D, 0x95, 0x22, 0x7D]);
+  }
+
+  assert.equal(await readHeadlessStandardInput(chunks()), '{"summary":"Olá 🍕"}');
+});
 
 test("CLI headless publica capacidades e limites de segurança sem acessar a API", async () => {
   const current = recordingTransport(() => {

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
+import { open, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import QRCode from "qrcode";
@@ -60,17 +60,107 @@ import {
 import {
   createHeadlessHttpTransport,
   executeHeadlessCommand,
+  HEADLESS_MAX_INPUT_BYTES,
+  HEADLESS_SCHEMA_VERSION,
   isHeadlessCommand,
   type HeadlessTransport,
 } from "./headless/cli.js";
+import {
+  addRemote,
+  getRemote,
+  listRemotes,
+  RemoteCliError,
+  removeRemote,
+} from "./remote/registry.js";
+import { runRemoteCommand } from "./remote/transport.js";
 
 await main().catch((error) => {
+  const args = process.argv.slice(2);
+  if (error instanceof RemoteCliError) {
+    printRemoteError(error, args);
+    process.exitCode = 2;
+    return;
+  }
+  if (isRemoteInvocation(args) && args.includes("--json")) {
+    printRemoteError(
+      new RemoteCliError(
+        "remote_config_io",
+        "Não foi possível acessar a configuração ou o transporte remoto local.",
+      ),
+      args,
+    );
+    process.exitCode = 2;
+    return;
+  }
   console.error(`Erro: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 });
 
+function printRemoteError(error: RemoteCliError, args: string[]): void {
+  if (!args.includes("--json")) {
+    console.error(`Erro: ${error.message}`);
+    return;
+  }
+  const payload = isRemoteHeadlessInvocation(args)
+    ? {
+        schemaVersion: HEADLESS_SCHEMA_VERSION,
+        ok: false,
+        command: remoteCommandName(args),
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        },
+      }
+    : {
+        ok: false,
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        },
+      };
+  console.error(JSON.stringify(payload));
+}
+
+function remoteCommandName(args: string[]): string {
+  const selectorIndex = args.findIndex(isRemoteSelector);
+  if (selectorIndex !== 0) {
+    const command = args[0]?.toLowerCase() ?? "remote";
+    const action = args.slice(1).find((argument) => !argument.startsWith("--"));
+    return action ? `${command}.${action}` : command;
+  }
+  const commandIndex = args[0] === "--remote" ? 2 : 1;
+  const command = args[commandIndex]?.toLowerCase() ?? "remote";
+  if (isRemoteSelector(command)) return "remote";
+  const action = args.slice(commandIndex + 1).find((argument) => !argument.startsWith("--"));
+  return action ? `${command}.${action}` : command;
+}
+
+function isRemoteSelector(argument: string): boolean {
+  return argument === "--remote" || argument.startsWith("--remote=");
+}
+
+function isRemoteInvocation(args: string[]): boolean {
+  return args[0] === "remote" || args.some(isRemoteSelector);
+}
+
+function isRemoteHeadlessInvocation(args: string[]): boolean {
+  return args[0] !== "remote" && args.some(isRemoteSelector);
+}
+
 async function main(): Promise<void> {
-  const command = (process.argv[2] ?? "help").toLowerCase();
+  const rawArgs = process.argv.slice(2);
+  const remoteInvocation = parseRemoteInvocation(rawArgs);
+  if (remoteInvocation) {
+    await runRemoteHeadlessCommand(remoteInvocation);
+    return;
+  }
+  const command = (rawArgs[0] ?? "help").toLowerCase();
+  if (command === "remote") {
+    await runRemoteConfigurationCommand(process.argv.slice(3));
+    return;
+  }
   if (isHeadlessCommand(command)) {
     await runHeadlessCommand(command);
     return;
@@ -154,6 +244,116 @@ async function main(): Promise<void> {
   }
 }
 
+interface RemoteInvocation {
+  remoteName: string;
+  command: string;
+  args: string[];
+}
+
+function parseRemoteInvocation(args: string[]): RemoteInvocation | null {
+  const selectorIndexes = args.flatMap((argument, index) =>
+    isRemoteSelector(argument) ? [index] : [],
+  );
+  if (!selectorIndexes.length) return null;
+  if (selectorIndexes.length > 1) {
+    throw new RemoteCliError(
+      "remote_selector_duplicate",
+      "Informe --remote somente uma vez, antes do comando headless.",
+    );
+  }
+  if (selectorIndexes[0] !== 0) {
+    throw new RemoteCliError(
+      "remote_selector_misplaced",
+      "Use --remote NAME como o prefixo da chamada, antes do comando headless.",
+    );
+  }
+
+  const selector = args[0]!;
+  const inline = selector.startsWith("--remote=");
+  const remoteName = inline ? selector.slice("--remote=".length) : args[1];
+  const commandIndex = inline ? 1 : 2;
+  const command = args[commandIndex]?.toLowerCase();
+  if (!remoteName || remoteName.startsWith("--") || !command || command.startsWith("--")) {
+    throw new RemoteCliError(
+      "remote_selector_invalid",
+      "Use: threadmark --remote NAME <comando-headless> [opções].",
+    );
+  }
+  return { remoteName, command, args: args.slice(commandIndex + 1) };
+}
+
+async function runRemoteHeadlessCommand(invocation: RemoteInvocation): Promise<void> {
+  if (!isHeadlessCommand(invocation.command)) {
+    throw new RemoteCliError(
+      "remote_unsupported_command",
+      `Comando remoto não suportado: ${invocation.command}. Use somente comandos headless.`,
+    );
+  }
+  const remote = await getRemote(invocation.remoteName);
+  const prepared = await prepareRemoteInput(invocation.args);
+  await runRemoteCommand({
+    remote,
+    command: invocation.command,
+    json: invocation.args.includes("--json"),
+    ...prepared,
+  });
+}
+
+async function prepareRemoteInput(args: string[]): Promise<{ args: string[]; input?: Buffer }> {
+  let inputIndex = -1;
+  let inputPath: string | undefined;
+  let inline = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!;
+    if (argument !== "--input" && !argument.startsWith("--input=")) continue;
+    if (inputIndex >= 0) {
+      throw new RemoteCliError("remote_input_duplicate", "--input foi informado mais de uma vez.");
+    }
+    inputIndex = index;
+    inline = argument.startsWith("--input=");
+    inputPath = inline ? argument.slice("--input=".length) : args[++index];
+    if (!inputPath || inputPath.startsWith("--")) {
+      throw new RemoteCliError("remote_input_invalid", "--input exige um arquivo local ou - para stdin.");
+    }
+  }
+  if (inputIndex < 0) return { args };
+  if (!inputPath) {
+    throw new RemoteCliError("remote_input_invalid", "--input exige um arquivo local ou - para stdin.");
+  }
+  if (inputPath === "-") return { args };
+  const localPath = path.resolve(process.env.THREADMARK_INVOKE_CWD ?? process.cwd(), inputPath);
+  const input = await readBoundedRemoteInput(localPath);
+  const remoteArgs = [...args];
+  if (inline) remoteArgs.splice(inputIndex, 1, "--input", "-");
+  else remoteArgs[inputIndex + 1] = "-";
+  return {
+    args: remoteArgs,
+    input,
+  };
+}
+
+async function readBoundedRemoteInput(inputPath: string): Promise<Buffer> {
+  const file = await open(inputPath, "r");
+  try {
+    const buffer = Buffer.alloc(HEADLESS_MAX_INPUT_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const result = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (!result.bytesRead) break;
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > HEADLESS_MAX_INPUT_BYTES) {
+      throw new RemoteCliError(
+        "input_too_large",
+        `O JSON de entrada deve ter no máximo ${HEADLESS_MAX_INPUT_BYTES} bytes.`,
+      );
+    }
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
+}
+
 async function runHeadlessCommand(command: string): Promise<void> {
   const config = loadConfig();
   const transport: HeadlessTransport = command === "capabilities"
@@ -176,6 +376,92 @@ async function runHeadlessCommand(command: string): Promise<void> {
     console.error(serialized);
     process.exitCode = 2;
   }
+}
+
+async function runRemoteConfigurationCommand(args: string[]): Promise<void> {
+  const action = args[0]?.toLowerCase();
+  const parsed = parseRemoteManagementArguments(args.slice(1));
+  if (action === "list") {
+    assertRemoteManagementArguments(parsed, 0, []);
+    printRemoteManagementResult({ ok: true, remotes: await listRemotes() }, parsed.json);
+    return;
+  }
+  if (action === "add") {
+    assertRemoteManagementArguments(parsed, 1, ["ssh", "container"]);
+    const remote = await addRemote({
+      name: parsed.positionals[0]!,
+      ssh: parsed.values.get("ssh")!,
+      container: parsed.values.get("container")!,
+    });
+    printRemoteManagementResult({ ok: true, remote }, parsed.json);
+    return;
+  }
+  if (action === "remove") {
+    assertRemoteManagementArguments(parsed, 1, []);
+    printRemoteManagementResult(
+      { ok: true, remote: await removeRemote(parsed.positionals[0]!) },
+      parsed.json,
+    );
+    return;
+  }
+  throw new RemoteCliError("remote_invalid_usage", "Use: threadmark remote add|list|remove.");
+}
+
+interface RemoteManagementArguments {
+  positionals: string[];
+  values: Map<string, string>;
+  json: boolean;
+}
+
+function parseRemoteManagementArguments(args: string[]): RemoteManagementArguments {
+  const positionals: string[] = [];
+  const values = new Map<string, string>();
+  let json = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!;
+    if (!argument.startsWith("--")) {
+      positionals.push(argument);
+      continue;
+    }
+    if (argument === "--json") {
+      if (json) throw new RemoteCliError("remote_option_duplicate", "--json foi informado mais de uma vez.");
+      json = true;
+      continue;
+    }
+    const optionText = argument.slice(2);
+    const separator = optionText.indexOf("=");
+    const name = separator < 0 ? optionText : optionText.slice(0, separator);
+    if (name !== "ssh" && name !== "container") {
+      throw new RemoteCliError("remote_invalid_usage", `Opção remota inválida: ${argument}.`);
+    }
+    if (values.has(name)) {
+      throw new RemoteCliError("remote_option_duplicate", `--${name} foi informado mais de uma vez.`);
+    }
+    const value = separator < 0 ? args[++index] : optionText.slice(separator + 1);
+    if (!value || value.startsWith("--")) {
+      throw new RemoteCliError("remote_invalid_usage", `--${name} exige um valor.`);
+    }
+    values.set(name, value);
+  }
+  return { positionals, values, json };
+}
+
+function assertRemoteManagementArguments(
+  args: RemoteManagementArguments,
+  positionalCount: number,
+  requiredOptions: string[],
+): void {
+  if (
+    args.positionals.length !== positionalCount
+    || args.values.size !== requiredOptions.length
+    || requiredOptions.some((option) => !args.values.has(option))
+  ) {
+    throw new RemoteCliError("remote_invalid_usage", "Opções remotas inválidas para esta ação.");
+  }
+}
+
+function printRemoteManagementResult(result: unknown, compact: boolean): void {
+  console.log(JSON.stringify(result, null, compact ? undefined : 2));
 }
 
 async function start(): Promise<void> {
@@ -870,12 +1156,18 @@ Operação:
 
 Configuração:
   configure [seção]           Abre o assistente (general, whatsapp, team, data)
+  remote add NAME --ssh ALIAS --container CONTAINER
+                              Salva um destino SSH local sem credenciais
+  remote list [--json]        Lista destinos SSH locais
+  remote remove NAME [--json] Remove somente o registro local
 
   service install             Inicia no login e recupera falhas no macOS
   service uninstall           Remove o serviço, preservando os dados
   service status              Mostra o estado do LaunchAgent
 
 Dados e suporte:
+  --remote NAME <comando-headless> [opções]
+                              Executa a família headless no container SSH cadastrado
   capabilities [--json]       Descreve a API headless e seus limites de segurança
   agent triage-* [--json]     Entrega a fila automática a um executor Hermes
   operators list [--json]     Lista identidades autorizáveis para auditoria

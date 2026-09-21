@@ -1,0 +1,44 @@
+#!/usr/bin/env node
+
+// Test-only SSH double. It intentionally evaluates the received remote command
+// with POSIX sh so remote transport quoting is exercised; production never loads it.
+import { spawn } from "node:child_process";
+import { appendFile } from "node:fs/promises";
+
+const args = process.argv.slice(2);
+const recordPath = process.env.THREADMARK_FAKE_SSH_LOG;
+if (recordPath) {
+  await appendFile(recordPath, `${JSON.stringify({ args })}\n`, { mode: 0o600 });
+}
+
+const holdMs = Number(process.env.THREADMARK_FAKE_SSH_HOLD_MS ?? "0");
+if (Number.isFinite(holdMs) && holdMs > 0) {
+  await new Promise((resolve) => setTimeout(resolve, holdMs));
+}
+
+const signal = process.env.THREADMARK_FAKE_SSH_SIGNAL;
+if (signal === "SIGINT" || signal === "SIGTERM") {
+  process.kill(process.pid, signal);
+} else {
+  const remoteCommand = args.at(-1);
+  if (!remoteCommand) {
+    process.stderr.write("fake ssh expected a remote command\n");
+    process.exitCode = 64;
+  } else {
+    const child = spawn("/bin/sh", ["-c", remoteCommand], {
+      env: process.env,
+      stdio: "inherit",
+    });
+    child.once("error", (error) => {
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 1;
+    });
+    child.once("exit", (code, childSignal) => {
+      if (childSignal) {
+        process.kill(process.pid, childSignal);
+        return;
+      }
+      process.exitCode = code ?? 1;
+    });
+  }
+}

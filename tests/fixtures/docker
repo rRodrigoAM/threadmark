@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+
+// Test-only Docker double reached through tests/fixtures/ssh; never production code.
+import { appendFile } from "node:fs/promises";
+
+const stdinChunks = [];
+for await (const chunk of process.stdin) stdinChunks.push(Buffer.from(chunk));
+const stdin = Buffer.concat(stdinChunks).toString("utf8");
+
+const args = process.argv.slice(2);
+const recordPath = process.env.THREADMARK_FAKE_DOCKER_LOG;
+if (recordPath) {
+  await appendFile(recordPath, `${JSON.stringify({ args, stdin })}\n`, { mode: 0o600 });
+}
+
+const stdout = process.env.THREADMARK_FAKE_DOCKER_STDOUT;
+if (stdout) process.stdout.write(stdout);
+const stderr = process.env.THREADMARK_FAKE_DOCKER_STDERR;
+if (stderr) process.stderr.write(stderr);
+
+const code = Number(process.env.THREADMARK_FAKE_DOCKER_EXIT ?? "0");
+process.exitCode = Number.isInteger(code) && code >= 0 && code <= 255 ? code : 1;
