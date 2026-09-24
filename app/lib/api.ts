@@ -437,21 +437,6 @@ export async function getResolvedTickets(
   return request<TicketListResponse>(`/api/tickets?${params}`);
 }
 
-export async function bulkUpdateTicketStatus(
-  ticketIds: string[],
-  status: "archived" | "resolved",
-): Promise<TicketSummary[]> {
-  const result = await request<{
-    tickets: TicketSummary[];
-    action: string;
-    changedAt: string;
-  }>("/api/tickets/bulk-status", {
-    method: "POST",
-    body: JSON.stringify({ ticketIds, status }),
-  });
-  return result.tickets;
-}
-
 export async function getConversations(
   options: {
     cursor?: string | null;

@@ -11,7 +11,6 @@ import {
   deleteCategory,
   detachCategoryFromTicket,
   getCategories,
-  bulkUpdateTicketStatus,
   createManualTicket,
   deleteTicket,
   deleteTicketInternalNote,
@@ -853,49 +852,6 @@ export function SupportApp({
     [commitTicketSnapshot, persistStatusChange, showToast],
   );
 
-  const handleBulkTicketStatusChange = useCallback(
-    async (
-      ticketIds: string[],
-      status: "archived" | "resolved",
-    ): Promise<TicketSummary[] | null> => {
-      for (const ticketId of ticketIds) invalidateTicketSnapshot(ticketId);
-      try {
-        const updated = await bulkUpdateTicketStatus(ticketIds, status);
-        for (const ticketId of ticketIds) invalidateTicketSnapshot(ticketId);
-        const changedIds = new Set(updated.map((ticket) => ticket.id));
-        setTickets((current) => {
-          const unchanged = current.filter((ticket) => !changedIds.has(ticket.id));
-          return status === "archived" ? unchanged : [...updated, ...unchanged];
-        });
-        setTicketDetails((current) => {
-          const next = new Map(current);
-          for (const ticketId of changedIds) next.delete(ticketId);
-          return next;
-        });
-        if (status === "archived") {
-          setSelectedId((current) => current && changedIds.has(current) ? null : current);
-        }
-        void getDashboard().then(setDashboard).catch(() => undefined);
-        showToast({
-          tone: "success",
-          message: status === "archived"
-            ? `${updated.length} ${updated.length === 1 ? "ticket arquivado" : "tickets arquivados"}. Nenhum dado foi excluído.`
-            : `${updated.length} ${updated.length === 1 ? "ticket restaurado" : "tickets restaurados"} ao estado anterior.`,
-        });
-        return updated;
-      } catch (error) {
-        showToast({
-          tone: "warning",
-          message: error instanceof Error
-            ? error.message
-            : "Não foi possível atualizar os tickets selecionados.",
-        });
-        return null;
-      }
-    },
-    [invalidateTicketSnapshot, showToast],
-  );
-
   const handleStatusChange = useCallback(
     (status: TicketStatus) => {
       if (currentSelectedId) requestStatusChange(currentSelectedId, status);
@@ -1617,12 +1573,12 @@ export function SupportApp({
             canCreateTicket={Boolean(access && access.user.role !== "viewer")}
             currentUserId={access?.user.id ?? null}
             loading={loading}
-            onBulkStatusChange={handleBulkTicketStatusChange}
             onCreateManualTicket={openManualTicketDialog}
             onMoveTicket={requestStatusChange}
             onOpenTicket={openTicket}
             onAssignTicket={handleUpdateTicketAssignee}
             tickets={tickets}
+            categories={categoryCatalog}
           />
         );
       case "clients":
@@ -1691,7 +1647,6 @@ export function SupportApp({
     detachingTicketMessageId,
     detailLoading,
     handleAddTicketNote,
-    handleBulkTicketStatusChange,
     handleCreateCategory,
     handleDeleteCategory,
     handleDeleteTicket,

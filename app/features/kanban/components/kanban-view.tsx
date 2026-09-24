@@ -1,26 +1,28 @@
 import {
   Archive,
-  ArchiveRestore,
   CheckCircle2,
   Columns3,
-  ListChecks,
+  FilterX,
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
   Search,
+  Tags,
   TicketPlus,
   UserRoundCheck,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getArchivedTickets, getResolvedTickets } from "@/app/lib/api";
-import type { TicketAssignee, TicketStatus, TicketSummary } from "@/app/lib/types";
+import { categoryFacetLabels } from "@/app/lib/category-facets";
+import type {
+  CategoryFacetType,
+  TicketAssignee,
+  TicketCategory,
+  TicketStatus,
+  TicketSummary,
+} from "@/app/lib/types";
 import { matchesTicketSearch } from "@/app/lib/ticket-search";
-import {
-  KANBAN_BULK_SELECTION_LIMIT,
-  toggleAllVisibleKanbanTickets,
-  toggleKanbanSelection,
-} from "@/app/lib/kanban-selection";
 import { getNextKanbanTab, type KanbanTab } from "@/app/lib/kanban-tabs";
 import { Button } from "@/app/components/ui/button";
 import { Card } from "@/app/components/ui/card";
@@ -35,6 +37,13 @@ import {
 import { EmptyState, LoadingState } from "@/app/components/shared/ui-states";
 import { cn } from "@/app/lib/utils";
 import { KanbanCard } from "./kanban-card";
+import {
+  getKanbanFilterOptions,
+  getVisibleKanbanFilterFacets,
+  hasKanbanCategoryFilters,
+  matchesKanbanCategoryFilters,
+  type KanbanCategoryFilters,
+} from "../domain/kanban-category-filters";
 import { getKanbanTicketTimestamp } from "../domain/kanban-ticket";
 
 type KanbanColumn = {
@@ -134,12 +143,12 @@ export function KanbanView({
   onCreateManualTicket,
   canCreateTicket,
   onMoveTicket,
-  onBulkStatusChange,
   assignees,
   currentUserId,
   canAssignTicket,
   assigningTicketId,
   onAssignTicket,
+  categories,
 }: {
   tickets: TicketSummary[];
   loading: boolean;
@@ -147,10 +156,6 @@ export function KanbanView({
   onCreateManualTicket: () => void;
   canCreateTicket: boolean;
   onMoveTicket: (id: string, status: TicketStatus) => void;
-  onBulkStatusChange: (
-    ticketIds: string[],
-    status: "archived" | "resolved",
-  ) => Promise<TicketSummary[] | null>;
   assignees: TicketAssignee[];
   currentUserId: string | null;
   canAssignTicket: boolean;
@@ -159,16 +164,15 @@ export function KanbanView({
     ticketId: string,
     assigneeId: string | null,
   ) => Promise<boolean>;
+  categories: TicketCategory[];
 }) {
   const [mode, setMode] = useState<KanbanMode>("active");
   const [query, setQuery] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
+  const [categoryFilters, setCategoryFilters] = useState<KanbanCategoryFilters>(
+    {},
+  );
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkError, setBulkError] = useState<string | null>(null);
-  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const [columnLimits, setColumnLimits] =
     useState<Record<string, number>>(initialColumnLimits);
   const [archivedVisibleCount, setArchivedVisibleCount] =
@@ -216,59 +220,80 @@ export function KanbanView({
     },
     [assigneeFilter, currentUserId],
   );
-  const hasActiveFilters = Boolean(query.trim()) || assigneeFilter !== "all";
+  const filterFacets = useMemo(
+    () => getVisibleKanbanFilterFacets(categories),
+    [categories],
+  );
+  const filterOptionsByFacet = useMemo(() => {
+    return Object.fromEntries(
+      filterFacets.map((facet) => [
+        facet,
+        getKanbanFilterOptions(categories, facet),
+      ] as const),
+    ) as Record<CategoryFacetType, TicketCategory[]>;
+  }, [categories, filterFacets]);
+  const matchesCategories = useCallback(
+    (ticket: TicketSummary) =>
+      matchesKanbanCategoryFilters(ticket, categoryFilters),
+    [categoryFilters],
+  );
+  const hasActiveFilters =
+    Boolean(query.trim()) ||
+    assigneeFilter !== "all" ||
+    hasKanbanCategoryFilters(categoryFilters);
+  const hasSelectableFilters =
+    assigneeFilter !== "all" || hasKanbanCategoryFilters(categoryFilters);
   const filteredActiveTickets = useMemo(
     () => activeTickets.filter(
-      (ticket) => matchesTicketSearch(ticket, query) && matchesAssignee(ticket),
+      (ticket) =>
+        matchesTicketSearch(ticket, query) &&
+        matchesAssignee(ticket) &&
+        matchesCategories(ticket),
     ),
-    [activeTickets, matchesAssignee, query],
+    [activeTickets, matchesAssignee, matchesCategories, query],
   );
   const filteredResolvedTickets = useMemo(
     () => hasActiveFilters
       ? sortTickets(
           tickets.filter(
-            (ticket) =>
-              ticket.status === "resolved" &&
-              matchesTicketSearch(ticket, query) &&
-              matchesAssignee(ticket),
+              (ticket) =>
+                ticket.status === "resolved" &&
+                matchesTicketSearch(ticket, query) &&
+                matchesAssignee(ticket) &&
+                matchesCategories(ticket),
           ),
           "active",
           "done",
         )
-      : resolvedTickets.filter(matchesAssignee),
-    [hasActiveFilters, matchesAssignee, query, resolvedTickets, tickets],
+      : resolvedTickets.filter(
+          (ticket) => matchesAssignee(ticket) && matchesCategories(ticket),
+        ),
+    [
+      hasActiveFilters,
+      matchesAssignee,
+      matchesCategories,
+      query,
+      resolvedTickets,
+      tickets,
+    ],
   );
   const filteredArchivedTickets = useMemo(
     () => archivedTickets.filter(
-      (ticket) => matchesTicketSearch(ticket, query) && matchesAssignee(ticket),
+      (ticket) =>
+        matchesTicketSearch(ticket, query) &&
+        matchesAssignee(ticket) &&
+        matchesCategories(ticket),
     ),
-    [archivedTickets, matchesAssignee, query],
+    [archivedTickets, matchesAssignee, matchesCategories, query],
   );
   const sortedArchivedTickets = useMemo(
     () => sortTickets(filteredArchivedTickets, "archived"),
     [filteredArchivedTickets],
   );
-  const visibleResolvedTickets = filteredResolvedTickets.slice(
-    0,
-    columnLimits.done ?? KANBAN_PAGE_SIZE,
-  );
   const visibleArchivedTickets = sortedArchivedTickets.slice(
     0,
     archivedVisibleCount,
   );
-  const visibleCancelledTickets = sortTickets(
-    filteredActiveTickets.filter((ticket) => ticket.status === "cancelled"),
-    "active",
-    "cancelled",
-  ).slice(0, columnLimits.cancelled ?? KANBAN_PAGE_SIZE);
-  const selectableTickets = mode === "active"
-    ? [...visibleResolvedTickets, ...visibleCancelledTickets]
-    : visibleArchivedTickets;
-  const selectableIds = new Set(selectableTickets.map((ticket) => ticket.id));
-  const selectedVisibleIds = [...selectedIds].filter((ticketId) => selectableIds.has(ticketId));
-  const allVisibleSelected = selectableTickets.length > 0 &&
-    selectableTickets.every((ticket) => selectedIds.has(ticket.id));
-
   const loadResolved = useCallback(async (reset: boolean) => {
     if (resolvedLoading && !reset) return;
     const requestId = resolvedRequestRef.current + 1;
@@ -391,9 +416,6 @@ export function KanbanView({
     setQuery(nextQuery);
     setColumnLimits(initialColumnLimits);
     setArchivedVisibleCount(KANBAN_PAGE_SIZE);
-    setSelectedIds(new Set());
-    setBulkError(null);
-    setSelectionNotice(null);
     if (mode === "archived") {
       setArchivedLoading(true);
       if (archivedSearchTimerRef.current !== null) {
@@ -406,11 +428,36 @@ export function KanbanView({
     }
   }
 
-  function updateAssigneeFilter(value: string) {
-    setAssigneeFilter(value);
+  function resetFilterSideEffects() {
     setColumnLimits(initialColumnLimits);
     setArchivedVisibleCount(KANBAN_PAGE_SIZE);
-    setSelectedIds(new Set());
+  }
+
+  function updateAssigneeFilter(value: string) {
+    setAssigneeFilter(value);
+    resetFilterSideEffects();
+  }
+
+  function updateCategoryFilter(facet: CategoryFacetType, value: string) {
+    setCategoryFilters((current) => ({ ...current, [facet]: value }));
+    resetFilterSideEffects();
+  }
+
+  function clearKanbanFilters() {
+    setQuery("");
+    setAssigneeFilter("all");
+    setCategoryFilters({});
+    resetFilterSideEffects();
+    if (mode === "archived") {
+      setArchivedLoading(true);
+      if (archivedSearchTimerRef.current !== null) {
+        window.clearTimeout(archivedSearchTimerRef.current);
+      }
+      archivedSearchTimerRef.current = window.setTimeout(() => {
+        archivedSearchTimerRef.current = null;
+        void loadArchived(true, "");
+      }, 250);
+    }
   }
 
   function switchMode(nextMode: KanbanMode) {
@@ -421,11 +468,10 @@ export function KanbanView({
     setMode(nextMode);
     setColumnLimits(initialColumnLimits);
     setArchivedVisibleCount(KANBAN_PAGE_SIZE);
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-    setBulkError(null);
-    setSelectionNotice(null);
-    if (nextMode === "archived") setAssigneeFilter("all");
+    if (nextMode === "archived") {
+      setAssigneeFilter("all");
+      setCategoryFilters({});
+    }
     if (
       nextMode === "archived" &&
       (!archivedLoaded || archivedQueryRef.current !== query.trim())
@@ -449,91 +495,6 @@ export function KanbanView({
     event.preventDefault();
     if (nextMode !== currentMode) switchMode(nextMode);
     (nextMode === "active" ? activeTabRef : archivedTabRef).current?.focus();
-  }
-
-  function toggleSelectionMode() {
-    setSelectionMode((current) => !current);
-    setSelectedIds(new Set());
-    setBulkError(null);
-    setSelectionNotice(null);
-  }
-
-  function toggleTicket(ticketId: string) {
-    const result = toggleKanbanSelection(selectedIds, ticketId);
-    setSelectedIds(result.selectedIds);
-    setSelectionNotice(result.limitReached
-      ? `O limite é de ${KANBAN_BULK_SELECTION_LIMIT} tickets por operação.`
-      : null);
-  }
-
-  function toggleAllVisible() {
-    const result = toggleAllVisibleKanbanTickets(
-      selectedIds,
-      selectableTickets.map((ticket) => ticket.id),
-    );
-    setSelectedIds(result.selectedIds);
-    setSelectionNotice(result.limitReached
-      ? `Foram selecionados os primeiros ${KANBAN_BULK_SELECTION_LIMIT} tickets visíveis. Esse é o limite por operação.`
-      : null);
-  }
-
-  async function runBulkAction() {
-    if (!selectedVisibleIds.length || bulkBusy) return;
-    if (mode === "active" && (!resolvedLoaded || resolvedLoading)) {
-      setSelectionNotice("Aguarde a atualização da coluna Resolvidos para continuar.");
-      return;
-    }
-    if (mode === "archived" && archivedLoading) {
-      setSelectionNotice("Aguarde a atualização dos tickets arquivados para continuar.");
-      return;
-    }
-    if (selectedVisibleIds.length > KANBAN_BULK_SELECTION_LIMIT) {
-      setSelectionNotice(
-        `O limite é de ${KANBAN_BULK_SELECTION_LIMIT} tickets por operação.`,
-      );
-      return;
-    }
-    setBulkBusy(true);
-    setBulkError(null);
-    const targetStatus = mode === "active" ? "archived" : "resolved";
-    const selectedResolvedCount = selectedVisibleIds.filter((ticketId) =>
-      visibleResolvedTickets.some((ticket) => ticket.id === ticketId)
-    ).length;
-    try {
-      const updated = await onBulkStatusChange(selectedVisibleIds, targetStatus);
-      if (!updated) {
-        setBulkError("A operação não foi concluída. Tente novamente.");
-        return;
-      }
-      if (targetStatus === "archived") {
-        const updatedIds = new Set(updated.map((ticket) => ticket.id));
-        setResolvedTickets((current) =>
-          current.filter((ticket) => !updatedIds.has(ticket.id))
-        );
-        setResolvedTotal((current) => Math.max(0, current - selectedResolvedCount));
-        if (archivedLoaded) {
-          setArchivedTickets((current) => mergeTickets(current, updated, true));
-          setArchivedTotal((current) => current + updated.length);
-        }
-      } else {
-        const updatedIds = new Set(updated.map((ticket) => ticket.id));
-        setArchivedTickets((current) => current.filter((ticket) => !updatedIds.has(ticket.id)));
-        setArchivedTotal((current) => Math.max(0, current - updated.length));
-        const restoredResolved = updated.filter((ticket) => ticket.status === "resolved");
-        setResolvedTickets((current) =>
-          sortTickets(mergeTickets(current, restoredResolved, true), "active", "done")
-            .slice(0, KANBAN_PAGE_SIZE)
-        );
-        setResolvedTotal((current) => current + restoredResolved.length);
-      }
-      void loadResolved(true);
-      void loadArchived(true);
-      setSelectedIds(new Set());
-      setSelectionMode(false);
-      setSelectionNotice(null);
-    } finally {
-      setBulkBusy(false);
-    }
   }
 
   if (loading) return <LoadingState label="Organizando o Kanban…" />;
@@ -591,25 +552,70 @@ export function KanbanView({
               </Button>
             ) : null}
           </div>
-          {mode === "active" ? <Select onValueChange={updateAssigneeFilter} value={assigneeFilter}>
-            <SelectTrigger
-              aria-label="Filtrar tickets por responsável"
-              className="h-9 w-full min-w-0 bg-background sm:w-56"
-            >
-              <UserRoundCheck size={14} />
-              <SelectValue placeholder="Responsável" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os responsáveis</SelectItem>
-              {currentUserId ? <SelectItem value="mine">Meus tickets</SelectItem> : null}
-              <SelectItem value="unassigned">Não atribuídos</SelectItem>
-              {assignees.map((assignee) => (
-                <SelectItem key={assignee.id} value={`user:${assignee.id}`}>
-                  {assignee.displayName}
-                </SelectItem>
+          {mode === "active" ? (
+            <>
+              <Select onValueChange={updateAssigneeFilter} value={assigneeFilter}>
+                <SelectTrigger
+                  aria-label="Filtrar tickets por responsável"
+                  className="h-9 w-full min-w-0 bg-background sm:w-52"
+                >
+                  <UserRoundCheck size={14} />
+                  <SelectValue placeholder="Responsável" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os responsáveis</SelectItem>
+                  {currentUserId ? <SelectItem value="mine">Meus tickets</SelectItem> : null}
+                  <SelectItem value="unassigned">Não atribuídos</SelectItem>
+                  {assignees.map((assignee) => (
+                    <SelectItem key={assignee.id} value={`user:${assignee.id}`}>
+                      {assignee.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {filterFacets.map((facet) => (
+                <Select
+                  key={facet}
+                  onValueChange={(value) => updateCategoryFilter(facet, value)}
+                  value={categoryFilters[facet] ?? "all"}
+                >
+                  <SelectTrigger
+                    aria-label={`Filtrar tickets por ${categoryFacetLabels[facet]}`}
+                    className="h-9 w-full min-w-0 bg-background sm:w-44"
+                  >
+                    <Tags size={14} />
+                    <SelectValue placeholder={categoryFacetLabels[facet]} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      Todos os {categoryFacetLabels[facet].toLowerCase()}s
+                    </SelectItem>
+                    <SelectItem value="none">
+                      Sem {categoryFacetLabels[facet].toLowerCase()}
+                    </SelectItem>
+                    {filterOptionsByFacet[facet].map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               ))}
-            </SelectContent>
-          </Select> : null}
+            </>
+          ) : null}
+          {hasSelectableFilters || query.trim() ? (
+            <Button
+              aria-label="Limpar filtros do Kanban"
+              className="h-9 w-full text-xs sm:w-auto"
+              onClick={clearKanbanFilters}
+              size="default"
+              type="button"
+              variant="ghost"
+            >
+              <FilterX size={14} />
+              Limpar filtros
+            </Button>
+          ) : null}
           <div
             aria-label="Visão do Kanban"
             className="inline-flex h-9 w-full min-w-0 items-center gap-1 rounded-lg border border-border bg-muted p-1 sm:w-auto"
@@ -660,89 +666,8 @@ export function KanbanView({
               ) : null}
             </Button>
           </div>
-          <Button
-            aria-pressed={selectionMode}
-            className="h-9 w-full text-xs sm:w-auto"
-            disabled={
-              bulkBusy ||
-              (mode === "active"
-                ? !resolvedLoaded || resolvedLoading || (!resolvedTickets.length && !visibleCancelledTickets.length)
-                : archivedLoading || !archivedTickets.length)
-            }
-            onClick={toggleSelectionMode}
-            size="default"
-            type="button"
-            variant={selectionMode ? "secondary" : "outline"}
-          >
-            {selectionMode ? <X size={14} /> : <ListChecks size={14} />}
-            {selectionMode
-              ? "Cancelar seleção"
-              : mode === "active"
-                ? "Selecionar encerrados"
-                : "Selecionar para restaurar"}
-          </Button>
         </div>
       </Card>
-
-      {selectionMode ? (
-        <Card
-          aria-label="Ações para os tickets selecionados"
-          className="mb-3 flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 shadow-sm"
-          role="region"
-          variant="unstyled"
-        >
-          <span className="text-sm text-foreground">
-            <b className="text-base text-primary">{selectedVisibleIds.length}</b>{" "}
-            {selectedVisibleIds.length === 1 ? "selecionado" : "selecionados"}
-            <small className="text-xs text-muted-foreground"> de {KANBAN_BULK_SELECTION_LIMIT}</small>
-          </span>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              disabled={
-                bulkBusy ||
-                !selectableTickets.length ||
-                (mode === "active" && resolvedLoading) ||
-                (mode === "archived" && archivedLoading)
-              }
-              onClick={toggleAllVisible}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {allVisibleSelected ? "Desmarcar todos" : "Selecionar todos os visíveis"}
-            </Button>
-            <Button
-              disabled={
-                bulkBusy ||
-                !selectedVisibleIds.length ||
-                (mode === "active" && (!resolvedLoaded || resolvedLoading)) ||
-                (mode === "archived" && archivedLoading)
-              }
-              onClick={() => void runBulkAction()}
-              size="sm"
-              type="button"
-              variant="default"
-            >
-              {bulkBusy ? <LoaderCircle className="animate-spin" size={14} /> : mode === "active" ? <Archive size={14} /> : <ArchiveRestore size={14} />}
-              {bulkBusy
-                ? "Atualizando…"
-                : mode === "active"
-                  ? `Arquivar ${selectedVisibleIds.length || ""}`
-                  : `Restaurar ${selectedVisibleIds.length || ""}`}
-            </Button>
-          </div>
-        </Card>
-      ) : null}
-      {selectionNotice ? (
-        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
-          {selectionNotice}
-        </p>
-      ) : null}
-      {bulkError ? (
-        <p className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
-          {bulkError}
-        </p>
-      ) : null}
 
       {mode === "active" ? (
         <div
@@ -810,7 +735,6 @@ export function KanbanView({
                     <KanbanCard
                       assignees={assignees}
                       assigning={assigningTicketId === ticket.id}
-                      busy={bulkBusy || (selectionMode && column.id === "done" && resolvedLoading)}
                       canAssign={canAssignTicket}
                       columnId={column.id}
                       currentUserId={currentUserId}
@@ -827,9 +751,6 @@ export function KanbanView({
                         if (updated && column.id === "done") void loadResolved(true);
                         return updated;
                       }}
-                      onToggle={() => toggleTicket(ticket.id)}
-                      selectable={selectionMode && (column.id === "done" || column.id === "cancelled")}
-                      selected={selectedIds.has(ticket.id)}
                       ticket={ticket}
                     />
                   ))}
@@ -852,10 +773,7 @@ export function KanbanView({
                   {hasLoadedColumnTickets || hasRemoteResolvedTickets ? (
                     <Button
                       className="w-full text-xs"
-                      disabled={
-                        bulkBusy ||
-                        (column.id === "done" && resolvedLoading)
-                      }
+                      disabled={column.id === "done" && resolvedLoading}
                       onClick={() => {
                         setColumnLimits((current) => ({
                           ...current,
@@ -904,7 +822,7 @@ export function KanbanView({
           {archivedError ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
               <span>{archivedError}</span>
-              <Button disabled={archivedLoading || bulkBusy} onClick={() => void loadArchived(true)} size="sm" type="button" variant="outline"><RefreshCw size={13} /> Tentar novamente</Button>
+              <Button disabled={archivedLoading} onClick={() => void loadArchived(true)} size="sm" type="button" variant="outline"><RefreshCw size={13} /> Tentar novamente</Button>
             </div>
           ) : null}
           {archivedLoading && !archivedLoaded ? <LoadingState label="Carregando arquivados…" /> : null}
@@ -927,7 +845,6 @@ export function KanbanView({
                 <KanbanCard
                   assignees={assignees}
                   assigning={assigningTicketId === ticket.id}
-                  busy={bulkBusy || (selectionMode && archivedLoading)}
                   canAssign={canAssignTicket}
                   currentUserId={currentUserId}
                   key={ticket.id}
@@ -938,9 +855,6 @@ export function KanbanView({
                     if (updated) void loadArchived(true);
                     return updated;
                   }}
-                  onToggle={() => toggleTicket(ticket.id)}
-                  selectable={selectionMode}
-                  selected={selectedIds.has(ticket.id)}
                   ticket={ticket}
                 />
               ))}
@@ -952,7 +866,7 @@ export function KanbanView({
           ) ? (
             <Button
               className="mx-auto mt-4 min-w-45"
-              disabled={archivedLoading || bulkBusy}
+              disabled={archivedLoading}
               onClick={() => {
                 setArchivedVisibleCount((current) => current + KANBAN_PAGE_SIZE);
                 if (
