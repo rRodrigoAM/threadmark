@@ -38,6 +38,8 @@ SUPPORT_TRIAGE_AI_QUIET_MS=180000
 
 A fila de triagem é consumida pelo Hermes externo. Sem ele conectado, os jobs permanecem disponíveis, sem iniciar Codex ou outro modelo dentro do container. Os demais workers continuam no daemon. `SUPPORT_TRIAGE_AI_ENABLED=false` habilita somente o classificador determinístico local; não há executor interno para instalar.
 
+Para conectar a CLI ou o Hermes sem acesso SSH, crie uma credencial em **Configurações → Segurança → CLI e Hermes**, cadastre o domínio público com `threadmark remote add NAME --url HTTPS_URL` e salve o token no macOS Keychain com `threadmark remote login NAME`. A API restringe essa credencial às operações headless e o servidor persiste somente seu hash.
+
 Não coloque tokens em build arguments nem em variáveis `NEXT_PUBLIC_*`.
 
 ## Primeiro deploy

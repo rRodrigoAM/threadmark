@@ -5,12 +5,26 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  createHeadlessHttpTransport,
   executeHeadlessCommand,
   HEADLESS_SCHEMA_VERSION,
   readHeadlessStandardInput,
   type HeadlessRequest,
   type HeadlessTransport,
 } from "../server/headless/cli.js";
+
+test("transporte HTTP rejeita resposta 2xx que não contém JSON", async () => {
+  const transport = createHeadlessHttpTransport({
+    apiUrl: "https://threadmark.example",
+    token: "token-de-teste",
+    fetch: async () => new Response("<html>erro</html>", { status: 200 }),
+  });
+
+  await assert.rejects(
+    () => transport.request("/api/tickets"),
+    /resposta JSON válida/i,
+  );
+});
 
 interface CapturedRequest {
   route: string;
@@ -355,4 +369,39 @@ test("CLI headless reivindica job externo somente como Hermes identificado", asy
       clientId: "hermes",
     },
   });
+});
+
+test("CLI headless rejeita arquivo de entrada acima do limite antes do transporte", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "threadmark-headless-large-input-"));
+  try {
+    await writeFile(path.join(directory, "large.json"), "x".repeat(64 * 1024 + 1));
+    const current = recordingTransport((route) => {
+      if (route === "/api/ticket-assignees") {
+        return [{ id: "user-weslem", displayName: "weslem", role: "owner" }];
+      }
+      throw new Error("não deveria consultar a API após resolver o ator");
+    });
+    const result = await executeHeadlessCommand(
+      "tickets",
+      [
+        "create",
+        "--input",
+        "large.json",
+        "--apply",
+        "--as",
+        "weslem",
+        "--client",
+        "hermes",
+        "--json",
+      ],
+      current.transport,
+      { invocationCwd: directory },
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.error.code, "input_too_large");
+    assert.equal(current.requests.length, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

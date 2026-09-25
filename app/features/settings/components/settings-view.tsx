@@ -147,9 +147,9 @@ export function SettingsView({
     setFeedback(null);
   }
 
-  function showFeedback(tone: "success" | "error", message: string) {
+  const showFeedback = useCallback((tone: "success" | "error", message: string) => {
     setFeedback({ tone, message });
-  }
+  }, []);
 
   if (loading && !workspace) {
     return (

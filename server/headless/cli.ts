@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
@@ -246,6 +246,8 @@ export function createHeadlessHttpTransport(input: {
   apiUrl: string;
   token: string;
   fetch?: typeof fetch;
+  timeoutMs?: number;
+  unavailableMessage?: string;
 }): HeadlessTransport {
   const request = input.fetch ?? fetch;
   return {
@@ -260,20 +262,33 @@ export function createHeadlessHttpTransport(input: {
       try {
         response = await request(new URL(route, input.apiUrl), {
           method: options.method ?? "GET",
+          redirect: "error",
           headers,
           body:
             options.body === undefined ? undefined : JSON.stringify(options.body),
+          signal: input.timeoutMs ? AbortSignal.timeout(input.timeoutMs) : undefined,
         });
       } catch {
         throw new HeadlessCliError(
           "api_unavailable",
-          "A API local está indisponível. Execute `threadmark on` primeiro.",
+          input.unavailableMessage
+            ?? "A API local está indisponível. Execute `threadmark on` primeiro.",
         );
       }
-      const payload = (await response.json().catch(() => null)) as
-        | T
+      let payload: T
         | { error?: { code?: string; message?: string; details?: unknown }; message?: string }
         | null;
+      try {
+        payload = await response.json() as typeof payload;
+      } catch {
+        if (response.ok) {
+          throw new HeadlessCliError(
+            "api_response_invalid",
+            "A API não retornou uma resposta JSON válida.",
+          );
+        }
+        payload = null;
+      }
       if (!response.ok) {
         const error = payload && typeof payload === "object" && "error" in payload
           ? payload.error
@@ -286,6 +301,12 @@ export function createHeadlessHttpTransport(input: {
               ? payload.message ?? `A API respondeu HTTP ${response.status}.`
               : `A API respondeu HTTP ${response.status}.`),
           error?.details,
+        );
+      }
+      if (payload === null) {
+        throw new HeadlessCliError(
+          "api_response_invalid",
+          "A API não retornou uma resposta JSON válida.",
         );
       }
       return payload as T;
@@ -870,9 +891,8 @@ async function readInput(
   }
   const content = inputPath === "-"
     ? await readHeadlessStandardInput()
-    : await readFile(
+    : await readBoundedInputFile(
         path.resolve(options.invocationCwd ?? process.cwd(), inputPath),
-        "utf8",
       );
   if (Buffer.byteLength(content, "utf8") > HEADLESS_MAX_INPUT_BYTES) {
     throw new HeadlessCliError(
@@ -885,6 +905,28 @@ async function readInput(
   } catch {
     throw new HeadlessCliError("invalid_json", "O arquivo de entrada não contém JSON válido.");
   }
+}
+
+async function readBoundedInputFile(filePath: string): Promise<string> {
+  const handle = await open(filePath, "r");
+  const buffer = Buffer.allocUnsafe(HEADLESS_MAX_INPUT_BYTES + 1);
+  let offset = 0;
+  try {
+    while (offset < buffer.length) {
+      const result = await handle.read(buffer, offset, buffer.length - offset, null);
+      if (result.bytesRead === 0) break;
+      offset += result.bytesRead;
+    }
+  } finally {
+    await handle.close();
+  }
+  if (offset > HEADLESS_MAX_INPUT_BYTES) {
+    throw new HeadlessCliError(
+      "input_too_large",
+      `O JSON de entrada deve ter no máximo ${HEADLESS_MAX_INPUT_BYTES} bytes.`,
+    );
+  }
+  return buffer.subarray(0, offset).toString("utf8");
 }
 
 export async function readHeadlessStandardInput(

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist/cli",
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "incremental": false
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["node_modules", "dist", ".next", ".vinext", "tests"]
+}

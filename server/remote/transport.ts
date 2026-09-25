@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 
-import { RemoteCliError, type RemoteTarget } from "./registry.js";
+import { RemoteCliError, type SshRemoteTarget } from "./registry.js";
 
 const SSH_CONNECT_TIMEOUT_SECONDS = 10;
 const MAX_CAPTURED_STDERR_BYTES = 64 * 1024;
 
 export interface RemoteCommandInput {
-  remote: RemoteTarget;
+  remote: SshRemoteTarget;
   command: string;
   args: string[];
   input?: Buffer;

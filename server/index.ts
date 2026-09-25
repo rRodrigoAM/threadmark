@@ -34,6 +34,7 @@ import {
 } from "../shared/contracts.js";
 import {
   AuthError,
+  IntegrationCredentialService,
   LocalAuthService,
   SetupChallengeService,
 } from "./auth/index.js";
@@ -123,6 +124,7 @@ type RequestIdentity =
       sessionToken: null;
       clientId: "hermes" | "threadmark-cli";
       clientLabel: "Hermes" | "Threadmark CLI";
+      integrationCredentialId: string | null;
     }
   | {
       kind: "local";
@@ -156,6 +158,14 @@ interface ApiServices {
 }
 
 const SESSION_COOKIE = "threadmark_session";
+
+const integrationCredentialInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    clientId: z.enum(["hermes", "threadmark-cli"]),
+    expiresAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
 
 const statusInputSchema = z.object({
   status: z.enum(TICKET_STATUSES),
@@ -830,6 +840,19 @@ function requireHermesAgentIdentity(
   return identity;
 }
 
+function requireIntegrationIdentity(
+  context: Context<ApiEnvironment>,
+): Extract<RequestIdentity, { kind: "agent" }> {
+  const identity = context.get("identity");
+  if (!identity || identity.kind !== "agent" || !identity.integrationCredentialId) {
+    throw new AuthError(
+      "forbidden",
+      "Esta operação exige uma credencial de integração autenticada.",
+    );
+  }
+  return identity;
+}
+
 function requireRole(
   context: Context<ApiEnvironment>,
   roles: AuthRole[],
@@ -885,6 +908,7 @@ function agentMachineIdentity(
   auth: LocalAuthService,
   userId: string,
   clientValue: string | undefined,
+  integrationCredentialId: string | null = null,
 ): Extract<RequestIdentity, { kind: "agent" }> {
   const clientId = (clientValue?.trim().toLowerCase() || "threadmark-cli") as
     | "hermes"
@@ -898,7 +922,38 @@ function agentMachineIdentity(
     sessionToken: null,
     clientId,
     clientLabel: clientId === "hermes" ? "Hermes" : "Threadmark CLI",
+    integrationCredentialId,
   };
+}
+
+function isHeadlessIntegrationRoute(method: string, pathname: string): boolean {
+  const routes: Array<{ method: string; path: RegExp }> = [
+    { method: "GET", path: /^\/api\/ticket-assignees$/ },
+    { method: "GET", path: /^\/api\/clients$/ },
+    { method: "GET", path: /^\/api\/categories$/ },
+    { method: "POST", path: /^\/api\/categories$/ },
+    { method: "DELETE", path: /^\/api\/categories\/[^/]+$/ },
+    { method: "GET", path: /^\/api\/conversations$/ },
+    { method: "GET", path: /^\/api\/conversations\/[^/]+\/(?:messages|tickets|triage-blocks)$/ },
+    { method: "POST", path: /^\/api\/conversations\/[^/]+\/triage\/(?:analyze|tickets|attach|ignore|context|restore)$/ },
+    { method: "GET", path: /^\/api\/dashboard$/ },
+    { method: "GET", path: /^\/api\/tickets$/ },
+    { method: "POST", path: /^\/api\/tickets$/ },
+    { method: "GET", path: /^\/api\/tickets\/by-number\/[^/]+$/ },
+    { method: "GET", path: /^\/api\/tickets\/[^/]+$/ },
+    { method: "PATCH", path: /^\/api\/tickets\/[^/]+$/ },
+    { method: "PATCH", path: /^\/api\/tickets\/[^/]+\/(?:assignee|status)$/ },
+    { method: "POST", path: /^\/api\/tickets\/[^/]+\/(?:categories|notes|external-messages)$/ },
+    { method: "DELETE", path: /^\/api\/tickets\/[^/]+\/categories\/[^/]+$/ },
+    { method: "DELETE", path: /^\/api\/tickets\/[^/]+\/notes\/[^/]+$/ },
+    { method: "PUT", path: /^\/api\/tickets\/[^/]+\/product-forwarding$/ },
+    { method: "GET", path: /^\/api\/agent\/triage\/jobs$/ },
+    { method: "POST", path: /^\/api\/agent\/triage\/jobs\/claim$/ },
+    { method: "POST", path: /^\/api\/agent\/triage\/jobs\/[^/]+\/(?:heartbeat|complete)$/ },
+    { method: "GET", path: /^\/api\/integration-credentials\/current$/ },
+    { method: "DELETE", path: /^\/api\/integration-credentials\/current$/ },
+  ];
+  return routes.some((route) => route.method === method && route.path.test(pathname));
 }
 
 function testMachineIdentity(): Extract<RequestIdentity, { kind: "test" }> {
@@ -1039,6 +1094,7 @@ function createApiAppInternal(
   const app = new Hono<ApiEnvironment>();
   const config = loadConfig();
   const directory = new DirectoryStore(store.database);
+  const integrationCredentials = new IntegrationCredentialService(store.database);
 
   app.use(
     "/api/*",
@@ -1102,6 +1158,54 @@ function createApiAppInternal(
         if (isMutation(context.req.method)) requireRole(context, ["owner", "admin", "operator"]);
         return next();
       }
+    }
+
+    if (authorization?.startsWith("Bearer ")) {
+      const token = authorization.slice("Bearer ".length).trim();
+      let credential;
+      try {
+        credential = integrationCredentials.authenticate(token);
+      } catch (error) {
+        if (!(error instanceof AuthError) || error.code !== "invalid_credentials") {
+          throw error;
+        }
+        throw new AuthError("authentication_required", "Credencial de integração inválida.");
+      }
+      if (!isHeadlessIntegrationRoute(context.req.method, pathname)) {
+        throw new AuthError(
+          "forbidden",
+          "A credencial de integração não permite esta operação.",
+        );
+      }
+      const delegatedActorId = context.req.header("X-Threadmark-Actor-Id")?.trim();
+      if (delegatedActorId && delegatedActorId !== credential.userId) {
+        throw new AuthError(
+          "forbidden",
+          "A credencial de integração não pode atuar como outro usuário.",
+        );
+      }
+      const requestedClientId = context.req.header("X-Threadmark-Agent-Client")
+        ?.trim()
+        .toLowerCase();
+      if (requestedClientId && requestedClientId !== credential.clientId) {
+        throw new AuthError(
+          "forbidden",
+          "A credencial de integração não permite este cliente.",
+        );
+      }
+      context.set(
+        "identity",
+        agentMachineIdentity(
+          auth,
+          credential.userId,
+          credential.clientId,
+          credential.id,
+        ),
+      );
+      if (isMutation(context.req.method)) {
+        requireRole(context, ["owner", "admin", "operator"]);
+      }
+      return next();
     }
 
     const token = getCookie(context, SESSION_COOKIE) ?? "";
@@ -1238,6 +1342,71 @@ function createApiAppInternal(
     );
     setSessionCookie(context, issued.token, issued.expiresAt, config.publicOrigin);
     return context.json(sessionResponse(store.database, issued));
+  });
+
+  app.get("/api/integration-credentials", (context) => {
+    const identity = requireUserIdentity(context);
+    return context.json({ items: integrationCredentials.list(identity.user.id) });
+  });
+
+  app.post("/api/integration-credentials", async (context) => {
+    const identity = requireUserIdentity(context);
+    const input = integrationCredentialInputSchema.parse(await context.req.json());
+    context.header("Cache-Control", "no-store");
+    return context.json(
+      integrationCredentials.create(identity.user.id, input),
+      201,
+    );
+  });
+
+  app.get("/api/integration-credentials/current", (context) => {
+    const identity = requireIntegrationIdentity(context);
+    const credential = integrationCredentials
+      .list(identity.user.id)
+      .find((item) => item.id === identity.integrationCredentialId);
+    if (!credential) {
+      throw new AuthError("authentication_required", "Credencial de integração inválida.");
+    }
+    return context.json({
+      credential,
+      user: {
+        id: identity.user.id,
+        displayName: identity.user.displayName,
+        role: identity.user.role,
+        active: identity.user.active,
+      },
+      clientId: identity.clientId,
+      headlessSchemaVersion: "threadmark.headless.v1",
+    });
+  });
+
+  app.delete("/api/integration-credentials/current", (context) => {
+    const identity = requireIntegrationIdentity(context);
+    const credential = integrationCredentials.revoke(
+      identity.user.id,
+      identity.integrationCredentialId!,
+    );
+    return context.json({
+      credential,
+      user: {
+        id: identity.user.id,
+        displayName: identity.user.displayName,
+        role: identity.user.role,
+        active: identity.user.active,
+      },
+      clientId: identity.clientId,
+      headlessSchemaVersion: "threadmark.headless.v1",
+    });
+  });
+
+  app.delete("/api/integration-credentials/:id", (context) => {
+    const identity = requireUserIdentity(context);
+    return context.json({
+      credential: integrationCredentials.revoke(
+        identity.user.id,
+        context.req.param("id"),
+      ),
+    });
   });
 
   app.get("/api/users", (context) => {

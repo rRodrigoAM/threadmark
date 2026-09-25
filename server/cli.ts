@@ -68,10 +68,17 @@ import {
 import {
   addRemote,
   getRemote,
+  isSshRemoteTarget,
   listRemotes,
   RemoteCliError,
   removeRemote,
 } from "./remote/registry.js";
+import { RemoteCredentialStore } from "./remote/credential-store.js";
+import {
+  loginRemote,
+  logoutRemote,
+  remoteCredentialStatus,
+} from "./remote/http.js";
 import { runRemoteCommand } from "./remote/transport.js";
 
 await main().catch((error) => {
@@ -290,6 +297,34 @@ async function runRemoteHeadlessCommand(invocation: RemoteInvocation): Promise<v
     );
   }
   const remote = await getRemote(invocation.remoteName);
+  if (!isSshRemoteTarget(remote)) {
+    if (invocation.command.toLowerCase() === "capabilities") {
+      await remoteCredentialStatus(remote);
+    }
+    const token = await new RemoteCredentialStore().read(remote);
+    const result = await executeHeadlessCommand(
+      invocation.command,
+      invocation.args,
+      createHeadlessHttpTransport({
+        apiUrl: remote.url,
+        token,
+        timeoutMs: 20_000,
+        unavailableMessage: "A API HTTPS remota do Threadmark está indisponível.",
+      }),
+      { invocationCwd: process.env.THREADMARK_INVOKE_CWD ?? process.cwd() },
+    );
+    const serialized = JSON.stringify(
+      result,
+      null,
+      invocation.args.includes("--json") ? undefined : 2,
+    );
+    if (result.ok) console.log(serialized);
+    else {
+      console.error(serialized);
+      process.exitCode = 2;
+    }
+    return;
+  }
   const prepared = await prepareRemoteInput(invocation.args);
   await runRemoteCommand({
     remote,
@@ -387,6 +422,15 @@ async function runRemoteConfigurationCommand(args: string[]): Promise<void> {
     return;
   }
   if (action === "add") {
+    if (parsed.values.has("url")) {
+      assertRemoteManagementArguments(parsed, 1, ["url"]);
+      const remote = await addRemote({
+        name: parsed.positionals[0]!,
+        url: parsed.values.get("url")!,
+      });
+      printRemoteManagementResult({ ok: true, remote }, parsed.json);
+      return;
+    }
     assertRemoteManagementArguments(parsed, 1, ["ssh", "container"]);
     const remote = await addRemote({
       name: parsed.positionals[0]!,
@@ -404,7 +448,21 @@ async function runRemoteConfigurationCommand(args: string[]): Promise<void> {
     );
     return;
   }
-  throw new RemoteCliError("remote_invalid_usage", "Use: threadmark remote add|list|remove.");
+  if (action === "login" || action === "status" || action === "logout") {
+    assertRemoteManagementArguments(parsed, 1, []);
+    const remote = await getRemote(parsed.positionals[0]!);
+    const status = action === "login"
+      ? await loginRemote(remote)
+      : action === "logout"
+        ? await logoutRemote(remote)
+        : await remoteCredentialStatus(remote);
+    printRemoteManagementResult({ ok: true, remote, status }, parsed.json);
+    return;
+  }
+  throw new RemoteCliError(
+    "remote_invalid_usage",
+    "Use: threadmark remote add|list|login|status|logout|remove.",
+  );
 }
 
 interface RemoteManagementArguments {
@@ -431,7 +489,7 @@ function parseRemoteManagementArguments(args: string[]): RemoteManagementArgumen
     const optionText = argument.slice(2);
     const separator = optionText.indexOf("=");
     const name = separator < 0 ? optionText : optionText.slice(0, separator);
-    if (name !== "ssh" && name !== "container") {
+    if (name !== "ssh" && name !== "container" && name !== "url") {
       throw new RemoteCliError("remote_invalid_usage", `Opção remota inválida: ${argument}.`);
     }
     if (values.has(name)) {
@@ -1156,9 +1214,14 @@ Operação:
 
 Configuração:
   configure [seção]           Abre o assistente (general, whatsapp, team, data)
+  remote add NAME --url HTTPS_URL
+                              Salva um destino HTTPS sem credenciais
   remote add NAME --ssh ALIAS --container CONTAINER
-                              Salva um destino SSH local sem credenciais
-  remote list [--json]        Lista destinos SSH locais
+                              Salva um destino SSH legado sem credenciais
+  remote list [--json]        Lista destinos remotos locais
+  remote login NAME [--json]  Salva e valida a credencial HTTPS no Keychain
+  remote status NAME [--json] Valida credencial, usuário e contrato HTTPS
+  remote logout NAME [--json] Revoga a credencial HTTPS e limpa o Keychain
   remote remove NAME [--json] Remove somente o registro local
 
   service install             Inicia no login e recupera falhas no macOS
@@ -1167,7 +1230,7 @@ Configuração:
 
 Dados e suporte:
   --remote NAME <comando-headless> [opções]
-                              Executa a família headless no container SSH cadastrado
+                              Executa a família headless por HTTPS ou SSH cadastrado
   capabilities [--json]       Descreve a API headless e seus limites de segurança
   agent triage-* [--json]     Entrega a fila automática a um executor Hermes
   operators list [--json]     Lista identidades autorizáveis para auditoria

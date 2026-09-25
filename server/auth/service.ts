@@ -440,6 +440,15 @@ export class LocalAuthService {
           )
           .run(username, displayName, role, active ? 1 : 0, now, userId);
         if (!active) this.revokeUserSessions(userId, currentActor.id, now);
+        if (!active || role !== currentTarget.role) {
+          this.database
+            .prepare(
+              `UPDATE integration_credentials
+               SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
+               WHERE user_id = ? AND revoked_at IS NULL`,
+            )
+            .run(now, now, userId);
+        }
         this.recordEvent("user_updated", userId, currentActor.id, now, {
           role,
           active,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,9 +11,15 @@ import {
   getRemote,
   listRemotes,
   RemoteCliError,
+  validateRemoteUrl,
 } from "../server/remote/registry.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
+
+test("URL remota aceita loopback IPv6 sem liberar HTTP externo", () => {
+  assert.equal(validateRemoteUrl("http://[::1]:4317"), "http://[::1]:4317");
+  assert.throws(() => validateRemoteUrl("http://example.com"), /HTTPS/i);
+});
 const shim = path.join(projectRoot, "bin", "threadmark.mjs");
 
 interface CliResult {
@@ -102,7 +109,7 @@ test("CLI remoto persiste e lista registros sem dados de credencial", async () =
 
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
     assert.deepEqual(config, {
-      version: 1,
+      version: 2,
       remotes: [
         {
           name: "production",
@@ -113,6 +120,270 @@ test("CLI remoto persiste e lista registros sem dados de credencial", async () =
     });
     assert.equal((await stat(configPath)).mode & 0o777, 0o600);
     assert.equal((await stat(path.dirname(configPath))).mode & 0o777, 0o700);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("CLI remoto cadastra destino HTTPS sem persistir credencial", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "threadmark-remote-https-"));
+  const configPath = path.join(directory, "config", "remotes.json");
+  const env = { THREADMARK_REMOTE_CONFIG_PATH: configPath };
+  try {
+    const added = await runThreadmark(
+      [
+        "remote",
+        "add",
+        "production",
+        "--url",
+        "https://threadmark.example.com/",
+        "--json",
+      ],
+      { env },
+    );
+
+    assert.equal(added.code, 0);
+    assert.deepEqual(JSON.parse(added.stdout), {
+      ok: true,
+      remote: {
+        name: "production",
+        url: "https://threadmark.example.com",
+      },
+    });
+    const configText = await readFile(configPath, "utf8");
+    assert.equal(configText.includes("token"), false);
+    assert.deepEqual(JSON.parse(configText), {
+      version: 2,
+      remotes: [
+        {
+          name: "production",
+          url: "https://threadmark.example.com",
+        },
+      ],
+    });
+
+    const pathUrl = await runThreadmark(
+      ["remote", "add", "path", "--url", "https://threadmark.example.com/app", "--json"],
+      { env },
+    );
+    assert.equal(pathUrl.code, 2);
+    assert.equal(JSON.parse(pathUrl.stderr).error.code, "invalid_remote_config");
+
+    for (const [name, url] of [
+      ["empty-query", "https://threadmark.example.com/?"],
+      ["empty-fragment", "https://threadmark.example.com/#"],
+      ["empty-userinfo", "https://@threadmark.example.com"],
+    ] as const) {
+      const rejected = await runThreadmark(
+        ["remote", "add", name, "--url", url, "--json"],
+        { env },
+      );
+      assert.equal(rejected.code, 2, `${url}: ${rejected.stderr}`);
+      assert.equal(JSON.parse(rejected.stderr).error.code, "invalid_remote_config");
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("CLI remoto HTTPS usa token do Keychain e não inicia SSH", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "threadmark-remote-http-run-"));
+  const configPath = path.join(directory, "config", "remotes.json");
+  const securityLog = path.join(directory, "security.jsonl");
+  const requests: Array<{ url: string; authorization: string | undefined }> = [];
+  const server = createServer((request, response) => {
+    requests.push({
+      url: request.url ?? "",
+      authorization: request.headers.authorization,
+    });
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ items: [], total: 0 }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  const env = {
+    NODE_ENV: "test",
+    THREADMARK_REMOTE_CONFIG_PATH: configPath,
+    THREADMARK_SECURITY_COMMAND: path.join(projectRoot, "tests", "fixtures", "security"),
+    THREADMARK_FAKE_SECURITY_LOG: securityLog,
+    THREADMARK_FAKE_KEYCHAIN_TOKEN: "tmk_token-do-keychain",
+  };
+  try {
+    const added = await runThreadmark(
+      ["remote", "add", "production", "--url", `http://127.0.0.1:${address.port}`, "--json"],
+      { env },
+    );
+    assert.equal(added.code, 0, added.stderr);
+
+    const invoked = await runThreadmark(
+      ["--remote", "production", "tickets", "list", "--json"],
+      { env },
+    );
+    assert.equal(invoked.code, 0, invoked.stderr);
+    assert.deepEqual(JSON.parse(invoked.stdout), {
+      schemaVersion: "threadmark.headless.v1",
+      ok: true,
+      command: "tickets.list",
+      data: { items: [], total: 0 },
+      meta: { readOnly: true, actorId: null, clientId: null },
+    });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.authorization, "Bearer tmk_token-do-keychain");
+    assert.match(requests[0]?.url ?? "", /^\/api\/tickets/);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("CLI gerencia login, status e logout HTTPS pelo Keychain", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "threadmark-remote-login-"));
+  const configPath = path.join(directory, "config", "remotes.json");
+  const securityLog = path.join(directory, "security.jsonl");
+  const methods: string[] = [];
+  const payload = {
+    credential: {
+      id: "credential-1",
+      userId: "user-1",
+      name: "Hermes no Mac",
+      scope: "headless",
+      clientId: "threadmark-cli",
+      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1_000).toISOString(),
+      lastUsedAt: "2026-09-24T15:00:00.000Z",
+      revokedAt: null,
+      createdAt: "2026-09-24T14:00:00.000Z",
+      updatedAt: "2026-09-24T15:00:00.000Z",
+    },
+    user: { id: "user-1", displayName: "Weslem", role: "owner", active: true },
+    clientId: "threadmark-cli",
+    headlessSchemaVersion: "threadmark.headless.v1",
+  };
+  let responsePayload: unknown = payload;
+  const server = createServer((request, response) => {
+    methods.push(request.method ?? "");
+    response.setHeader("content-type", "application/json");
+    const body = request.method === "DELETE"
+      ? {
+          ...payload,
+          credential: { ...payload.credential, revokedAt: "2026-09-25T10:30:00.000Z" },
+        }
+      : responsePayload;
+    response.end(JSON.stringify(body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  const env = {
+    NODE_ENV: "test",
+    THREADMARK_REMOTE_CONFIG_PATH: configPath,
+    THREADMARK_SECURITY_COMMAND: path.join(projectRoot, "tests", "fixtures", "security"),
+    THREADMARK_FAKE_SECURITY_LOG: securityLog,
+    THREADMARK_FAKE_KEYCHAIN_TOKEN: "tmk_token-do-keychain",
+  };
+  try {
+    const added = await runThreadmark(
+      ["remote", "add", "production", "--url", `http://127.0.0.1:${address.port}`, "--json"],
+      { env },
+    );
+    assert.equal(added.code, 0, added.stderr);
+
+    const login = await runThreadmark(["remote", "login", "production", "--json"], { env });
+    assert.equal(login.code, 0, login.stderr);
+    assert.equal((JSON.parse(login.stdout) as { status: { user: { id: string } } }).status.user.id, "user-1");
+
+    responsePayload = {};
+    const failedLogin = await runThreadmark(
+      ["remote", "login", "production", "--json"],
+      { env },
+    );
+    assert.equal(failedLogin.code, 2);
+    const failedLoginError = JSON.parse(
+      failedLogin.stderr.trim().split("\n").at(-1) ?? "null",
+    );
+    assert.equal(failedLoginError.error.code, "remote_response_invalid");
+    responsePayload = payload;
+
+    const status = await runThreadmark(["remote", "status", "production", "--json"], { env });
+    assert.equal(status.code, 0, status.stderr);
+
+    responsePayload = {};
+    const malformed = await runThreadmark(
+      ["remote", "status", "production", "--json"],
+      { env },
+    );
+    assert.equal(malformed.code, 2);
+    assert.equal(JSON.parse(malformed.stderr).error.code, "remote_response_invalid");
+
+    responsePayload = {
+      ...payload,
+      user: { ...payload.user, id: "outro-usuario" },
+      headlessSchemaVersion: "incompatível.v999",
+    };
+    const inconsistent = await runThreadmark(
+      ["remote", "status", "production", "--json"],
+      { env },
+    );
+    assert.equal(inconsistent.code, 2);
+    assert.equal(JSON.parse(inconsistent.stderr).error.code, "remote_response_invalid");
+    responsePayload = payload;
+
+    const logout = await runThreadmark(["remote", "logout", "production", "--json"], { env });
+    assert.equal(logout.code, 0, logout.stderr);
+    assert.deepEqual(methods, ["GET", "GET", "GET", "GET", "GET", "DELETE"]);
+
+    const securityCalls = (await readFile(securityLog, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => (JSON.parse(line) as { args: string[] }).args[0]);
+    assert.deepEqual(securityCalls, [
+      "add-generic-password",
+      "find-generic-password",
+      "delete-generic-password",
+      "add-generic-password",
+      "add-generic-password",
+      "find-generic-password",
+      "delete-generic-password",
+      "find-generic-password",
+      "find-generic-password",
+      "find-generic-password",
+      "find-generic-password",
+      "delete-generic-password",
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("registro remoto v1 continua legível e é migrado somente ao escrever", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "threadmark-remote-v1-"));
+  const configPath = path.join(directory, "config", "remotes.json");
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(
+    configPath,
+    `${JSON.stringify({
+      version: 1,
+      remotes: [
+        { name: "legacy", ssh: "threadmark-prod", container: "threadmark-production" },
+      ],
+    })}\n`,
+  );
+  try {
+    const listed = await runThreadmark(["remote", "list", "--json"], {
+      env: { THREADMARK_REMOTE_CONFIG_PATH: configPath },
+    });
+    assert.equal(listed.code, 0);
+    assert.equal((JSON.parse(await readFile(configPath, "utf8")) as { version: number }).version, 1);
+
+    const added = await runThreadmark(
+      ["remote", "add", "production", "--url", "https://threadmark.example.com", "--json"],
+      { env: { THREADMARK_REMOTE_CONFIG_PATH: configPath } },
+    );
+    assert.equal(added.code, 0);
+    assert.equal((JSON.parse(await readFile(configPath, "utf8")) as { version: number }).version, 2);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

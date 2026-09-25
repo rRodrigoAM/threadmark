@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+
+import { appendFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+if (process.env.THREADMARK_FAKE_SECURITY_LOG) {
+  appendFileSync(
+    process.env.THREADMARK_FAKE_SECURITY_LOG,
+    `${JSON.stringify({ args })}\n`,
+  );
+}
+if (args[0] === "find-generic-password") {
+  process.stdout.write(`${process.env.THREADMARK_FAKE_KEYCHAIN_TOKEN ?? ""}\n`);
+}

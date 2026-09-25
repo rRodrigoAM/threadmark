@@ -7,6 +7,7 @@ import { type SettingsRole } from "@/app/lib/settings";
 import { changeLocalPassword } from "@/app/lib/access";
 import { Button } from "@/app/components/ui/button";
 import { inputClass, SectionLayout, Field, SecurityCard, PermissionRow, roleLabel, errorMessage } from "../settings-support";
+import { IntegrationCredentialsSection } from "./integration-credentials-section";
 
 export function SecuritySection({
   currentUserRole,
@@ -70,6 +71,10 @@ export function SecuritySection({
         </div>
       </div>
     </SectionLayout>
+    <IntegrationCredentialsSection
+      canManage={currentUserRole !== "viewer"}
+      onFeedback={onFeedback}
+    />
     <SectionLayout description="Atualize sua credencial ou encerre esta sessão do navegador." icon={KeyRound} title="Sua conta">
       <form className="space-y-5" onSubmit={changePassword}>
         <div className="grid gap-4 md:grid-cols-3">

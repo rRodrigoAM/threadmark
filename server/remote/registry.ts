@@ -3,18 +3,26 @@ import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/pr
 import os from "node:os";
 import path from "node:path";
 
-const REMOTE_CONFIG_VERSION = 1;
+const REMOTE_CONFIG_VERSION = 2;
+const LEGACY_REMOTE_CONFIG_VERSION = 1;
 const REMOTE_CONFIG_LOCK_TIMEOUT_MS = 2_000;
 const REMOTE_CONFIG_LOCK_RETRY_MS = 20;
 const REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SSH_ALIAS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
-export interface RemoteTarget {
+export interface SshRemoteTarget {
   name: string;
   ssh: string;
   container: string;
 }
+
+export interface HttpsRemoteTarget {
+  name: string;
+  url: string;
+}
+
+export type RemoteTarget = SshRemoteTarget | HttpsRemoteTarget;
 
 interface RemoteConfigFile {
   version: typeof REMOTE_CONFIG_VERSION;
@@ -62,6 +70,56 @@ export function validateContainerName(value: string): string {
     CONTAINER_NAME_PATTERN,
     "Nome de container inválido. Use letras, números, ponto, hífen ou sublinhado.",
   );
+}
+
+export function validateRemoteUrl(value: string): string {
+  const candidate = value.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new RemoteCliError("invalid_remote_config", "URL remota inválida.");
+  }
+  const loopbackHttp = parsed.protocol === "http:"
+    && (
+      parsed.hostname === "127.0.0.1"
+      || parsed.hostname === "localhost"
+      || parsed.hostname === "::1"
+      || parsed.hostname === "[::1]"
+    );
+  if (parsed.protocol !== "https:" && !loopbackHttp) {
+    throw new RemoteCliError(
+      "invalid_remote_config",
+      "A URL remota deve usar HTTPS; HTTP é aceito somente em loopback local.",
+    );
+  }
+  const authority = candidate.match(/^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/i)?.[1] ?? "";
+  if (
+    authority.includes("@")
+    || candidate.includes("?")
+    || candidate.includes("#")
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new RemoteCliError(
+      "invalid_remote_config",
+      "A URL remota não pode conter credenciais, query string ou fragmento.",
+    );
+  }
+  if (parsed.pathname !== "/" && parsed.pathname.replace(/\/+$/, "") !== "") {
+    throw new RemoteCliError(
+      "invalid_remote_config",
+      "A URL remota deve apontar para a origem, sem caminho adicional.",
+    );
+  }
+  parsed.pathname = "/";
+  return parsed.toString().replace(/\/$/, "");
+}
+
+export function isSshRemoteTarget(remote: RemoteTarget): remote is SshRemoteTarget {
+  return "ssh" in remote;
 }
 
 export async function listRemotes(configPath = remoteConfigPath()): Promise<RemoteTarget[]> {
@@ -138,6 +196,12 @@ function validate(value: string, pattern: RegExp, message: string): string {
 }
 
 function normalizeRemote(remote: RemoteTarget): RemoteTarget {
+  if (!isSshRemoteTarget(remote)) {
+    return {
+      name: validateRemoteName(remote.name),
+      url: validateRemoteUrl(remote.url),
+    };
+  }
   return {
     name: validateRemoteName(remote.name),
     ssh: validateSshAlias(remote.ssh),
@@ -199,25 +263,36 @@ async function readConfig(configPath: string): Promise<RemoteConfigFile> {
 }
 
 function parseConfig(value: unknown): RemoteConfigFile {
-  if (!isRecord(value) || value.version !== REMOTE_CONFIG_VERSION || !Array.isArray(value.remotes)) {
+  if (
+    !isRecord(value)
+    || (value.version !== REMOTE_CONFIG_VERSION && value.version !== LEGACY_REMOTE_CONFIG_VERSION)
+    || !Array.isArray(value.remotes)
+  ) {
     throw new RemoteCliError("remote_config_invalid", "O arquivo de remotos tem formato inválido.");
   }
   const remotes = value.remotes.map((candidate) => {
-    if (!isRecord(candidate) || Object.keys(candidate).length !== 3) {
+    if (!isRecord(candidate) || typeof candidate.name !== "string") {
       throw new RemoteCliError("remote_config_invalid", "O arquivo de remotos contém um registro inválido.");
     }
     if (
-      typeof candidate.name !== "string"
-      || typeof candidate.ssh !== "string"
-      || typeof candidate.container !== "string"
+      Object.keys(candidate).length === 3
+      && typeof candidate.ssh === "string"
+      && typeof candidate.container === "string"
     ) {
-      throw new RemoteCliError("remote_config_invalid", "O arquivo de remotos contém um registro inválido.");
+      return normalizeRemote({
+        name: candidate.name,
+        ssh: candidate.ssh,
+        container: candidate.container,
+      });
     }
-    return normalizeRemote({
-      name: candidate.name,
-      ssh: candidate.ssh,
-      container: candidate.container,
-    });
+    if (
+      value.version === REMOTE_CONFIG_VERSION
+      && Object.keys(candidate).length === 2
+      && typeof candidate.url === "string"
+    ) {
+      return normalizeRemote({ name: candidate.name, url: candidate.url });
+    }
+    throw new RemoteCliError("remote_config_invalid", "O arquivo de remotos contém um registro inválido.");
   });
   const names = new Set(remotes.map((remote) => remote.name));
   if (names.size !== remotes.length) {

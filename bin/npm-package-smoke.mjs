@@ -67,6 +67,7 @@ try {
   const installedRoot = path.join(globalModules.stdout.trim(), metadata.name);
   await Promise.all([
     assertPath(path.join(installedRoot, "dist", "server", "index.js")),
+    assertPath(path.join(installedRoot, "dist", "cli", "server", "cli.js")),
     assertPath(path.join(installedRoot, "server", "cli.ts")),
     assertPath(path.join(installedRoot, "node_modules", "tsx", "dist", "cli.mjs")),
   ]);
@@ -124,6 +125,27 @@ try {
   const remoteReport = JSON.parse(remoteList.stdout);
   if (remoteReport.ok !== true || !Array.isArray(remoteReport.remotes) || remoteReport.remotes.length !== 0) {
     throw new Error("A CLI instalada não conseguiu listar o cadastro remoto vazio e isolado.");
+  }
+  await rm(path.join(installedRoot, "server", "cli.ts"));
+  for (const argumentsList of [
+    ["--remote", "missing", "capabilities", "--json"],
+    ["--remote=missing", "capabilities", "--json"],
+  ]) {
+    const missingRemote = await run(executable, argumentsList, {
+      allowedExitCodes: [2],
+      cwd: temporary,
+      env: {
+        ...process.env,
+        HOME: remoteHome,
+        XDG_CONFIG_HOME: path.join(remoteHome, ".config"),
+        THREADMARK_REMOTE_CONFIG_PATH: path.join(remoteHome, ".config", "threadmark", "remotes.json"),
+        SUPPORT_DATA_DIR: forbiddenPackageDataDirectory,
+      },
+    });
+    const error = JSON.parse(missingRemote.stderr);
+    if (error.error?.code !== "remote_not_found") {
+      throw new Error(`A CLI compilada não preservou o erro remoto para ${argumentsList[0]}.`);
+    }
   }
   await assertMissing(forbiddenPackageDataDirectory);
 

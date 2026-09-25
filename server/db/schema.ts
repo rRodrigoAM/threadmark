@@ -3791,4 +3791,26 @@ export const migrations: Migration[] = [
       ) STRICT;
     `,
   },
+  {
+    version: 73,
+    name: "scoped_integration_credentials",
+    sql: `
+      CREATE TABLE integration_credentials (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES local_users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        token_digest TEXT NOT NULL UNIQUE,
+        scope TEXT NOT NULL CHECK (scope = 'headless'),
+        client_id TEXT NOT NULL CHECK (client_id IN ('hermes', 'threadmark-cli')),
+        expires_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX integration_credentials_user_status_idx
+        ON integration_credentials(user_id, revoked_at, created_at DESC);
+    `,
+  },
 ];

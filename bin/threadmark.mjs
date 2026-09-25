@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,7 +9,15 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const invocationCwd = process.cwd();
 const tsxCli = path.join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
 const cli = path.join(projectRoot, "server", "cli.ts");
-const child = spawn(process.execPath, [tsxCli, cli, ...process.argv.slice(2)], {
+const isRemoteInvocation = process.argv[2] === "remote"
+  || process.argv[2] === "--remote"
+  || process.argv[2]?.startsWith("--remote=");
+const compiledCli = path.join(projectRoot, "dist", "cli", "server", "cli.js");
+const useCompiledCli = isRemoteInvocation && !existsSync(path.join(projectRoot, ".git")) && existsSync(compiledCli);
+const childArguments = useCompiledCli
+  ? [compiledCli, ...process.argv.slice(2)]
+  : [tsxCli, cli, ...process.argv.slice(2)];
+const child = spawn(process.execPath, childArguments, {
   cwd: projectRoot,
   env: { ...process.env, THREADMARK_INVOKE_CWD: invocationCwd },
   stdio: "inherit",

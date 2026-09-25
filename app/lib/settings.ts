@@ -45,6 +45,24 @@ export interface UpdateSettingsUserInput {
   active?: boolean;
 }
 
+export interface IntegrationCredential {
+  id: string;
+  userId: string;
+  name: string;
+  scope: "headless";
+  clientId: "hermes" | "threadmark-cli";
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssuedIntegrationCredential {
+  credential: IntegrationCredential;
+  token: string;
+}
+
 export interface StaffParticipant {
   id: string;
   displayName: string;
@@ -196,6 +214,22 @@ function normalizeUser(value: unknown): SettingsUser {
     active: booleanValue(object.active, true),
     lockedUntil: nullableString(object.lockedUntil),
     lastLoginAt: nullableString(object.lastLoginAt),
+    createdAt: stringValue(object.createdAt),
+    updatedAt: stringValue(object.updatedAt),
+  };
+}
+
+function normalizeIntegrationCredential(value: unknown): IntegrationCredential {
+  const object = asObject(value);
+  return {
+    id: stringValue(object.id),
+    userId: stringValue(object.userId),
+    name: stringValue(object.name),
+    scope: "headless",
+    clientId: object.clientId === "hermes" ? "hermes" : "threadmark-cli",
+    expiresAt: nullableString(object.expiresAt),
+    lastUsedAt: nullableString(object.lastUsedAt),
+    revokedAt: nullableString(object.revokedAt),
     createdAt: stringValue(object.createdAt),
     updatedAt: stringValue(object.updatedAt),
   };
@@ -357,6 +391,44 @@ export async function deleteSettingsUser(userId: string): Promise<void> {
   await settingsRequest<{ ok: true }>(`/api/users/${encodeURIComponent(userId)}`, {
     method: "DELETE",
   });
+}
+
+export async function getIntegrationCredentials(): Promise<IntegrationCredential[]> {
+  const payload = asObject(
+    await settingsRequest<unknown>("/api/integration-credentials"),
+  );
+  return Array.isArray(payload.items)
+    ? payload.items.map(normalizeIntegrationCredential)
+    : [];
+}
+
+export async function createIntegrationCredential(input: {
+  name: string;
+  clientId: "hermes" | "threadmark-cli";
+  expiresAt: string | null;
+}): Promise<IssuedIntegrationCredential> {
+  const payload = asObject(
+    await settingsRequest<unknown>("/api/integration-credentials", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+  return {
+    credential: normalizeIntegrationCredential(payload.credential),
+    token: stringValue(payload.token),
+  };
+}
+
+export async function revokeIntegrationCredential(
+  credentialId: string,
+): Promise<IntegrationCredential> {
+  const payload = asObject(
+    await settingsRequest<unknown>(
+      `/api/integration-credentials/${encodeURIComponent(credentialId)}`,
+      { method: "DELETE" },
+    ),
+  );
+  return normalizeIntegrationCredential(payload.credential);
 }
 
 export async function getStaffSettings(): Promise<StaffSettings> {
