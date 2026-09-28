@@ -1605,6 +1605,7 @@ export function SupportApp({
       case "dashboard":
         return (
           <DashboardView
+            currentUserId={access?.user.id ?? null}
             dashboard={dashboard}
             loading={loading}
             onOpenInbox={() => navigateToView("kanban")}
