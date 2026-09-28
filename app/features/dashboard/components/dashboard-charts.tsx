@@ -276,23 +276,27 @@ export function DashboardDailyChart({
   data: DashboardData["ticketsByDay"];
 }) {
   const compactDates = data.length > 14;
+  const maximumTickets = Math.max(
+    0,
+    ...data.flatMap((item) => [item.created, item.resolved]),
+  );
+  const yAxisMaximum = maximumTickets + Math.max(1, Math.ceil(maximumTickets * 0.1));
   return (
     <div
       aria-label="Gráfico de tickets criados e resolvidos por dia"
-      className="w-full overflow-x-auto rounded-md focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
-      tabIndex={compactDates ? 0 : undefined}
+      className="w-full rounded-md focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
     >
       <ChartContainer
         className="h-48 w-full aspect-auto"
         config={dailyChartConfig}
         initialDimension={{ width: 720, height: 192 }}
-        style={compactDates ? { minWidth: `${data.length * 38}px` } : undefined}
       >
-        <LineChart accessibilityLayer data={data} margin={{ left: 0, right: 8 }}>
+        <LineChart accessibilityLayer data={data} margin={{ top: 8, left: 0, right: 8, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis
             axisLine={false}
             dataKey="date"
+            minTickGap={24}
             tickFormatter={(value: string) =>
               new Intl.DateTimeFormat(
                 "pt-BR",
@@ -309,9 +313,11 @@ export function DashboardDailyChart({
           <YAxis
             allowDecimals={false}
             axisLine={false}
+            domain={[0, yAxisMaximum]}
             tickLine={false}
             tickMargin={8}
-            width={36}
+            tickFormatter={(value: number) => value.toLocaleString("pt-BR")}
+            width={Math.max(36, String(yAxisMaximum).length * 8 + 12)}
           />
           <ChartTooltip
             content={
