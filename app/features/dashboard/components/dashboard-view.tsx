@@ -56,9 +56,10 @@ import {
   DashboardMetricCard,
   DashboardStatusDonut,
 } from "./dashboard-charts";
+import { DashboardRhythmHeatmap } from "./dashboard-rhythm-heatmap";
 
-const allAssigneesFilter = "all";
-const unassignedFilter = "unassigned";
+type DashboardViewMode = "you" | "team";
+const teamAssigneeFilter = "all";
 
 function dashboardRequestKey(
   range: DashboardDateRange,
@@ -137,12 +138,14 @@ export function DashboardView({
   onOpenInbox,
   onOpenTicket,
   timeZone,
+  currentUserId,
 }: {
   dashboard: DashboardData | null;
   loading: boolean;
   onOpenInbox: () => void;
   onOpenTicket: (id: string) => void;
   timeZone: string;
+  currentUserId: string | null;
 }) {
   const initialRange = useMemo(
     () => getDashboardPresetRange("last_7_days", new Date(), timeZone),
@@ -150,7 +153,7 @@ export function DashboardView({
   );
   const [selectedPeriod, setSelectedPeriod] =
     useState<DashboardPeriodId>("last_7_days");
-  const [selectedAssignee, setSelectedAssignee] = useState(allAssigneesFilter);
+  const [viewMode, setViewMode] = useState<DashboardViewMode>("team");
   const [range, setRange] = useState<DashboardDateRange>(initialRange);
   const [draftFrom, setDraftFrom] = useState(initialRange.from ?? "");
   const [draftTo, setDraftTo] = useState(initialRange.to ?? "");
@@ -165,11 +168,32 @@ export function DashboardView({
     requestKey: string;
     data: DashboardData;
   } | null>(null);
+  const [loadedHeatmap, setLoadedHeatmap] = useState<{
+    assigneeId: string;
+    data: DashboardData["ticketsByDay"];
+  } | null>(null);
   const rangeFrom = range.from;
   const rangeTo = range.to;
+  const selectedAssignee =
+    viewMode === "you" && currentUserId ? currentUserId : teamAssigneeFilter;
+  const selectedAssigneeLabel = viewMode === "you" && currentUserId
+    ? "Você"
+    : "Toda a equipe";
   const activeRangeKey = dashboardRangeKey(range);
   const activeRequestKey = dashboardRequestKey(range, selectedAssignee);
   const today = initialRange.to ?? "";
+  const heatmapReferenceDate = useMemo(
+    () => new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date()),
+    [timeZone],
+  );
+  const heatmapRange = useMemo(() => {
+    const [year, month] = heatmapReferenceDate.split("-").map(Number);
+    const firstMonth = new Date(Date.UTC(year, month - 12, 1));
+    return {
+      from: `${firstMonth.getUTCFullYear()}-${String(firstMonth.getUTCMonth() + 1).padStart(2, "0")}-01`,
+      to: heatmapReferenceDate,
+    };
+  }, [heatmapReferenceDate]);
 
   useEffect(() => {
     let active = true;
@@ -195,28 +219,31 @@ export function DashboardView({
     };
   }, [dashboard, rangeFrom, rangeTo, reloadVersion, selectedAssignee]);
 
+  useEffect(() => {
+    if (viewMode !== "you" || !currentUserId) return;
+    let active = true;
+    void getDashboard(heatmapRange, currentUserId)
+      .then((data) => {
+        if (active) {
+          setLoadedHeatmap({ assigneeId: currentUserId, data: data.ticketsByDay });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [currentUserId, heatmapRange, reloadVersion, viewMode]);
+
   const currentDashboard =
     loadedDashboard?.requestKey === activeRequestKey
       ? loadedDashboard.data
-      : activeRangeKey === "all:all" && selectedAssignee === allAssigneesFilter
+      : activeRangeKey === "all:all" && viewMode === "team"
         ? dashboard
         : null;
   const effectiveRange = currentDashboard?.period
     ? { from: currentDashboard.period.from, to: currentDashboard.period.to }
     : range;
   const rangeLabel = formatDashboardRangeLabel(effectiveRange, timeZone);
-  const assigneeOptions =
-    currentDashboard?.assigneeMetrics ??
-    loadedDashboard?.data.assigneeMetrics ??
-    dashboard?.assigneeMetrics ??
-    [];
-  const selectedAssigneeLabel =
-    selectedAssignee === allAssigneesFilter
-      ? "Toda a equipe"
-      : selectedAssignee === unassignedFilter
-        ? "Sem responsável"
-        : assigneeOptions.find((metric) => metric.assignee?.id === selectedAssignee)
-            ?.assignee?.displayName ?? "Responsável selecionado";
 
   function loadRange(nextRange: DashboardDateRange) {
     setFilterLoading(true);
@@ -234,12 +261,12 @@ export function DashboardView({
     setReloadVersion((current) => current + 1);
   }
 
-  function selectAssignee(assigneeId: string) {
-    if (assigneeId === selectedAssignee) return;
+  function selectViewMode(nextMode: DashboardViewMode) {
+    if (nextMode === viewMode) return;
     setFilterLoading(true);
     setLoadError(null);
     setExportError(null);
-    setSelectedAssignee(assigneeId);
+    setViewMode(nextMode);
   }
 
   function selectPeriod(period: DashboardPeriodId) {
@@ -327,27 +354,17 @@ export function DashboardView({
           </Select>
         </label>
         <label className="flex min-w-0 flex-col gap-1">
-          <span className="text-xs font-medium text-muted-foreground">Responsável</span>
+          <span className="text-xs font-medium text-muted-foreground">Visualização</span>
           <Select
-            onValueChange={selectAssignee}
-            value={selectedAssignee}
+            onValueChange={(value) => selectViewMode(value as DashboardViewMode)}
+            value={viewMode}
           >
-            <SelectTrigger aria-label="Filtrar dashboard por responsável" className="h-9 w-full min-w-44 text-sm sm:w-fit">
+            <SelectTrigger aria-label="Selecionar visualização do dashboard" className="h-9 w-full min-w-44 text-sm sm:w-fit">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={allAssigneesFilter}>Toda a equipe</SelectItem>
-              {assigneeOptions
-                .filter((metric) => metric.assignee)
-                .map((metric) => (
-                  <SelectItem key={metric.assignee!.id} value={metric.assignee!.id}>
-                    {metric.assignee!.displayName}
-                    {metric.assignee!.active ? "" : " (inativo)"}
-                  </SelectItem>
-                ))}
-              {assigneeOptions.some((metric) => !metric.assignee) ? (
-                <SelectItem value={unassignedFilter}>Sem responsável</SelectItem>
-              ) : null}
+              <SelectItem value="team">Toda equipe</SelectItem>
+              <SelectItem disabled={!currentUserId} value="you">Você</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -607,7 +624,7 @@ export function DashboardView({
         </div>
       </Card>
     ),
-    team: (
+    team: viewMode === "team" ? (
       <Card className="min-w-0 gap-4 p-4 py-4 shadow-sm">
         <DashboardPanelHeader
           action={(
@@ -621,8 +638,7 @@ export function DashboardView({
         />
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {currentDashboard.assigneeMetrics.map((metric) => {
-            const filterValue = metric.assignee?.id ?? unassignedFilter;
-            const selected = selectedAssignee === filterValue;
+            const key = metric.assignee?.id ?? "unassigned";
             const displayName = metric.assignee?.displayName ?? "Sem responsável";
             const initials = metric.assignee
               ? metric.assignee.displayName
@@ -633,29 +649,21 @@ export function DashboardView({
                   .join("")
               : "—";
             return (
-              <Button
-                aria-pressed={selected}
+              <div
                 className={cn(
-                  "grid min-h-24 min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border bg-background p-3 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-primary/5",
-                  selected && "border-primary bg-primary/5 ring-1 ring-primary/20",
+                  "grid min-h-24 min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border bg-background p-3 text-left shadow-xs",
                 )}
-                key={filterValue}
-                onClick={() => selectAssignee(filterValue)}
-                size="unstyled"
-                type="button"
-                variant="unstyled"
+                key={key}
               >
                 <span className="row-span-2 grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                   {initials}
                 </span>
                 <span className="flex min-w-0 items-center justify-between gap-2">
                   <strong className="truncate text-sm font-semibold text-foreground">{displayName}</strong>
-                  <Badge className="shrink-0" variant={selected ? "default" : "outline"}>
-                    {selected
-                      ? "Filtrado"
-                      : metric.assignee
-                        ? metric.assignee.active ? "Ativo" : "Inativo"
-                        : "Fila"}
+                  <Badge className="shrink-0" variant="outline">
+                    {metric.assignee
+                      ? metric.assignee.active ? "Ativo" : "Inativo"
+                      : "Fila"}
                   </Badge>
                 </span>
                 <span className="grid min-w-0 grid-cols-3 gap-2 text-xs text-muted-foreground">
@@ -663,7 +671,7 @@ export function DashboardView({
                   <span className="flex flex-col"><b className="text-sm text-foreground">{formatNumber(metric.open)}</b>Abertos</span>
                   <span className="flex flex-col"><b className="text-sm text-foreground">{formatNumber(metric.resolved)}</b>Resolvidos</span>
                 </span>
-              </Button>
+              </div>
             );
           })}
         </div>
@@ -673,7 +681,27 @@ export function DashboardView({
           </p>
         ) : null}
       </Card>
-    ),
+    ) : null,
+    activity: viewMode === "you" ? (
+      <Card className="min-w-0 gap-4 p-4 py-4 shadow-sm">
+        <DashboardPanelHeader
+          action={(
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <i className="size-2 rounded-sm bg-[var(--chart-4)]" />Resolvidos
+            </span>
+          )}
+          description="Tickets resolvidos por dia nos últimos 12 meses"
+          icon={<TrendingUp size={17} />}
+          title="Seu ritmo de atendimento"
+        />
+        <DashboardRhythmHeatmap
+          data={loadedHeatmap?.assigneeId === currentUserId
+            ? loadedHeatmap.data
+            : currentDashboard.ticketsByDay}
+          referenceDate={heatmapReferenceDate}
+        />
+      </Card>
+    ) : null,
     rhythm: (
       <Card className="min-w-0 gap-4 p-4 py-4 shadow-sm">
         <DashboardPanelHeader
@@ -685,7 +713,7 @@ export function DashboardView({
           )}
           description={chartPeriodDescription}
           icon={<TrendingUp size={17} />}
-          title="Ritmo do atendimento"
+          title="Tickets criados x resolvidos"
         />
         {currentDashboard.ticketsByDay.length ? (
           <DashboardDailyChart data={currentDashboard.ticketsByDay} />
@@ -815,12 +843,23 @@ export function DashboardView({
       ) : null}
       <section className="grid grid-flow-row-dense items-start gap-3 lg:grid-cols-12">
         <div className="lg:col-span-12">{widgetContent.overview}</div>
-        <div className="lg:col-span-12">{widgetContent.health}</div>
-        <div className="lg:col-span-12">{widgetContent.team}</div>
+        {viewMode === "team" ? (
+          <>
+            <div className="lg:col-span-12">{widgetContent.health}</div>
+            <div className="lg:col-span-12">{widgetContent.team}</div>
+          </>
+        ) : null}
+        {viewMode === "you" ? (
+          <div className="lg:col-span-12">{widgetContent.activity}</div>
+        ) : null}
         <div className="lg:col-span-12">{widgetContent.rhythm}</div>
-        <div className="lg:col-span-4">{widgetContent.audit}</div>
+        {viewMode === "team" ? (
+          <div className="lg:col-span-4">{widgetContent.audit}</div>
+        ) : null}
         <div className="lg:col-span-4">{widgetContent.status}</div>
-        <div className="lg:col-span-4">{widgetContent.categories}</div>
+        {viewMode === "team" ? (
+          <div className="lg:col-span-4">{widgetContent.categories}</div>
+        ) : null}
         <div className="lg:col-span-4">{widgetContent.priority}</div>
         <div className="lg:col-span-4">{widgetContent.groups}</div>
         <div className="lg:col-span-4">{widgetContent.recent}</div>

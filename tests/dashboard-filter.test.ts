@@ -97,8 +97,16 @@ test("UI consulta e exporta exatamente o período e responsável selecionados", 
   assert.doesNotMatch(view, /Personalizar|Arraste para mover|Ocultar bloco|Restaurar padrão/);
   assert.doesNotMatch(supportApp, /currentUserId=\{access\?\.user\.id \?\? "local"\}/);
   assert.match(view, /getDashboardExport\(range, selectedAssignee\)/);
-  assert.match(view, /Filtrar dashboard por responsável/);
+  assert.match(view, /Selecionar visualização do dashboard/);
+  assert.match(view, /<SelectItem value="team">Toda equipe<\/SelectItem>/);
+  assert.match(view, /<SelectItem disabled=\{!currentUserId\} value="you">Você<\/SelectItem>/);
+  assert.match(view, /viewMode === "you" && currentUserId \? currentUserId : teamAssigneeFilter/);
+  assert.match(view, /viewMode === "you" \? \(/);
+  assert.match(view, /DashboardActivityHeatmap/);
+  assert.match(view, /Seu ritmo de respostas/);
+  assert.match(view, /quanto mais escuro, mais respostas/);
   assert.match(view, /Atendimento por responsável/);
+  assert.match(view, /team: viewMode === "team" \? \(/);
   assert.match(view, /Taxa de resolução/);
   assert.match(view, /Tempo mediano de resolução/);
   assert.match(view, /Saúde da operação/);
@@ -109,6 +117,7 @@ test("UI consulta e exporta exatamente o período e responsável selecionados", 
   assert.match(view, /Tickets por prioridade/);
   assert.match(view, /vs\. anterior/);
   assert.match(view, /Sem responsável/);
+  assert.match(supportApp, /currentUserId=\{access\?\.user\.id \?\? null\}/);
   assert.match(view, /currentDashboard\.period/);
   assert.match(view, /Tickets criados e resoluções de/);
   assert.match(view, /Este número representa a fila atual/);
