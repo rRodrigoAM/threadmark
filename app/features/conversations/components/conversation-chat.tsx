@@ -240,7 +240,7 @@ export function ConversationChat({
             </div>
           </div>
           {selectedMessageIds.size ? (
-            <div className="absolute right-2 bottom-2 left-2 z-20 hidden min-h-12 items-center gap-1.5 overflow-x-auto rounded-xl border border-white/10 bg-slate-900/95 p-1.5 text-white shadow-xl max-[760px]:flex">
+            <div className="absolute right-2 bottom-2 left-2 z-20 hidden min-h-12 items-center gap-1.5 overflow-x-auto rounded-xl border border-border bg-popover/95 p-1.5 text-popover-foreground shadow-xl max-[760px]:flex">
               <span className="flex min-w-16 items-center gap-1 text-xs">
                 <b className="text-sm">{selectedMessageIds.size}</b> selecionadas
               </span>
