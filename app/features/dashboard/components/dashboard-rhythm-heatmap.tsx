@@ -108,14 +108,14 @@ export function DashboardRhythmHeatmap({
       </div>
       {activeDay ? (
         <div
-          className="pointer-events-none fixed z-50 min-w-32 -translate-x-1/2 -translate-y-full rounded-lg border border-white/10 bg-[#0b0d12] px-3 py-2 text-xs text-white shadow-xl"
+          className="pointer-events-none fixed z-50 min-w-32 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl"
           role="status"
           style={{ left: activeDay.x, top: activeDay.y - 10 }}
         >
           <strong className="mb-1.5 block font-medium">{formatDate(activeDay.date)}</strong>
-          <span className="flex items-center justify-between gap-5 text-slate-400">
+          <span className="flex items-center justify-between gap-5 text-muted-foreground">
             <span className="flex items-center gap-2"><i className="size-2 rounded-sm bg-[var(--chart-4)]" />Resolvidos</span>
-            <b className="font-mono font-medium text-white">{activeDay.resolved.toLocaleString("pt-BR")}</b>
+            <b className="font-mono font-medium text-foreground">{activeDay.resolved.toLocaleString("pt-BR")}</b>
           </span>
         </div>
       ) : null}

@@ -145,19 +145,19 @@ export function CategoriesView({
 
   return (
     <div className="grid min-h-full min-w-0 gap-4 p-4 sm:p-5">
-      <Card className="flex flex-col items-start gap-3 rounded-xl border-0 bg-linear-to-br from-slate-900 to-indigo-950 p-4 text-white shadow-sm sm:flex-row sm:items-center" variant="unstyled">
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-primary/25 text-primary-foreground">
+      <Card className="flex flex-col items-start gap-3 rounded-xl border border-border bg-linear-to-br from-primary/10 via-card to-primary/5 p-4 text-foreground shadow-sm sm:flex-row sm:items-center" variant="unstyled">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-primary/15 bg-primary/10 text-primary">
           <Layers3 size={21} />
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold">Taxonomia multidimensional</h2>
-          <p className="mt-1 text-sm leading-relaxed text-slate-300">
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             Crie o catálogo persistido no SQLite. Categorias de motivo, produto,
             plataforma e sintoma também ficam disponíveis para a IA classificar os
             tickets.
           </p>
         </div>
-        <b className="whitespace-nowrap rounded-lg border border-white/10 bg-primary/20 px-3 py-2 text-xs text-indigo-100">
+        <b className="whitespace-nowrap rounded-lg border border-border bg-background/70 px-3 py-2 text-xs text-muted-foreground">
           {totalCatalog} categoria{totalCatalog === 1 ? "" : "s"} · {totalTicketBindings} vínculos
         </b>
       </Card>
