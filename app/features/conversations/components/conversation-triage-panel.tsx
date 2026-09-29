@@ -203,7 +203,7 @@ export function ConversationTriagePanel({
         />
       ) : null}
       {busy ? (
-        <div className="sticky bottom-2 mx-auto my-2 flex w-fit items-center gap-1.5 rounded-full bg-slate-800 px-2.5 py-2 text-xs text-white shadow-xl">
+        <div className="sticky bottom-2 mx-auto my-2 flex w-fit items-center gap-1.5 rounded-full border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-xl">
           <LoaderCircle className="animate-spin" size={15} /> Atualizando
           triagem…
         </div>

@@ -97,20 +97,20 @@ function RuntimeBadge({ runtime }: { runtime: RuntimeState | null }) {
     <div className="flex items-start gap-2.5 px-2 py-2">
       <span
         className={cn(
-          "mt-1.5 size-2 shrink-0 rounded-full bg-slate-500 ring-4 ring-slate-500/10",
+          "mt-1.5 size-2 shrink-0 rounded-full bg-sidebar-muted ring-4 ring-sidebar-muted/10",
           isOnline && "bg-emerald-400 ring-emerald-400/10",
           isLocalInvestigation && !isOnline && "bg-violet-400 ring-violet-400/10",
         )}
       />
       <div className="min-w-0">
-        <strong className="block text-sm font-semibold text-slate-200">{label}</strong>
+        <strong className="block text-sm font-semibold text-sidebar-foreground">{label}</strong>
         {runtime ? (
           <>
-            <span className="mt-1 block text-xs leading-relaxed text-slate-400">
+            <span className="mt-1 block text-xs leading-relaxed text-sidebar-muted">
               {runtime.groupsDiscovered} grupos · {runtime.privateConversations} conversas privadas
             </span>
             {runtime.groupsDiscovered > 0 ? (
-              <span className={cn("mt-0.5 block text-xs text-slate-400", runtime.monitoredGroups === 0 && "text-amber-400")}>
+              <span className={cn("mt-0.5 block text-xs text-sidebar-muted", runtime.monitoredGroups === 0 && "text-amber-600 dark:text-amber-400")}>
                 {runtime.monitoredGroups === 0
                   ? "Nenhum grupo monitorado · tickets pausados"
                   : `${runtime.monitoredGroups} grupos monitorados`}
@@ -118,7 +118,7 @@ function RuntimeBadge({ runtime }: { runtime: RuntimeState | null }) {
             ) : null}
           </>
         ) : (
-          <span className="mt-1 block text-xs text-slate-400">API local · porta 4317</span>
+          <span className="mt-1 block text-xs text-sidebar-muted">API local · porta 4317</span>
         )}
       </div>
     </div>
@@ -144,7 +144,7 @@ function NavGroup({
 }) {
   return (
     <div className="mb-5">
-      <p className="mb-1 px-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{title}</p>
+      <p className="mb-1 px-3 text-xs font-bold uppercase tracking-[0.16em] text-sidebar-muted">{title}</p>
       <nav aria-label={title} className="grid gap-0.5">
         {items.map((item) => {
           const Icon = item.icon;
@@ -160,8 +160,8 @@ function NavGroup({
             <Button
               asChild
               className={cn(
-                "h-9 w-full justify-start gap-2.5 rounded-lg px-3 text-sm font-medium text-slate-400 hover:bg-card/5 hover:text-slate-100",
-                activeView === item.id && "bg-primary/25 text-white hover:bg-primary/30 hover:text-white",
+                "h-9 w-full justify-start gap-2.5 rounded-lg px-3 text-sm font-medium text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground",
+                activeView === item.id && "bg-sidebar-active text-primary hover:bg-sidebar-active hover:text-primary",
               )}
               key={item.id}
               variant="ghost"
@@ -185,7 +185,7 @@ function NavGroup({
                 <Icon size={18} strokeWidth={1.9} />
                 <span className="min-w-0 flex-1 truncate text-left">{item.label}</span>
                 {count !== null && count > 0 ? (
-                  <small className="grid min-w-5 place-items-center rounded-full bg-card/10 px-1.5 py-0.5 text-xs text-slate-200">{count}</small>
+                  <small className="grid min-w-5 place-items-center rounded-full bg-sidebar-foreground/10 px-1.5 py-0.5 text-xs text-sidebar-foreground">{count}</small>
                 ) : null}
               </a>
             </Button>
@@ -209,7 +209,7 @@ export function Sidebar(props: SidebarProps) {
           props.open && "translate-x-0",
         )}
       >
-        <div className="flex h-[72px] shrink-0 items-center gap-3 border-b border-white/5 px-4">
+        <div className="flex h-[72px] shrink-0 items-center gap-3 border-b border-sidebar-line px-4">
           <Image
             alt=""
             aria-hidden="true"
@@ -220,12 +220,12 @@ export function Sidebar(props: SidebarProps) {
             width={36}
           />
           <div className="min-w-0 flex-1">
-            <strong className="block text-sm font-semibold text-white">Threadmark</strong>
-            <span className="mt-0.5 block text-xs text-slate-400">Suporte local</span>
+            <strong className="block text-sm font-semibold text-sidebar-foreground">Threadmark</strong>
+            <span className="mt-0.5 block text-xs text-sidebar-muted">Suporte local</span>
           </div>
           <Button
             aria-label="Fechar navegação"
-            className="inline-flex text-slate-400 hover:bg-card/10 hover:text-white md:hidden"
+            className="inline-flex text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground md:hidden"
             onClick={props.onClose}
             size="icon"
             type="button"
@@ -235,13 +235,13 @@ export function Sidebar(props: SidebarProps) {
           </Button>
         </div>
 
-        <div className="mx-3 mt-3 flex items-center gap-2.5 rounded-xl border border-white/10 bg-card/5 p-2.5">
-          <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/25 text-xs font-bold text-violet-200">{initials(props.workspaceName)}</div>
+        <div className="mx-3 mt-3 flex items-center gap-2.5 rounded-xl border border-sidebar-line bg-sidebar-hover p-2.5">
+          <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{initials(props.workspaceName)}</div>
           <div className="min-w-0 flex-1">
-            <strong className="block truncate text-sm font-semibold text-slate-100">{props.workspaceName}</strong>
-            <span className="mt-0.5 block truncate text-xs text-slate-400">{presentationMode ? "Ambiente de apresentação" : "Somente nesta máquina"}</span>
+            <strong className="block truncate text-sm font-semibold text-sidebar-foreground">{props.workspaceName}</strong>
+            <span className="mt-0.5 block truncate text-xs text-sidebar-muted">{presentationMode ? "Ambiente de apresentação" : "Somente nesta máquina"}</span>
           </div>
-          <ChevronLeft className="-rotate-90 text-slate-500" size={15} />
+          <ChevronLeft className="-rotate-90 text-sidebar-muted" size={15} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5">
@@ -283,24 +283,24 @@ export function Sidebar(props: SidebarProps) {
           />
         </div>
 
-        <div className="shrink-0 border-t border-white/5 px-3 py-3">
+        <div className="shrink-0 border-t border-sidebar-line px-3 py-3">
           <RuntimeBadge runtime={props.runtime} />
           <div className="mt-1 flex items-stretch gap-2">
             <Button
               aria-label="Abrir configurações da conta"
-              className="h-auto min-w-0 flex-1 justify-start gap-2.5 rounded-xl border border-white/10 bg-card/5 px-2.5 py-2 text-left text-slate-200 hover:bg-card/10 hover:text-white"
+              className="h-auto min-w-0 flex-1 justify-start gap-2.5 rounded-xl border border-sidebar-line bg-sidebar-hover px-2.5 py-2 text-left text-sidebar-foreground hover:bg-sidebar-active hover:text-sidebar-foreground"
               onClick={() => props.onNavigate("settings")}
               type="button"
               variant="ghost"
             >
-              <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/20 text-xs font-bold text-violet-200">{initials(props.operatorName)}</div>
+              <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{initials(props.operatorName)}</div>
               <div className="min-w-0 flex-1">
                 <strong className="block truncate text-xs font-semibold">{props.operatorName}</strong>
-                <span className="mt-0.5 block truncate text-2xs text-slate-400">{props.operatorRole}</span>
+                <span className="mt-0.5 block truncate text-2xs text-sidebar-muted">{props.operatorRole}</span>
               </div>
               <CircleGauge size={17} />
             </Button>
-            <ThemeMenu className="h-auto w-10 shrink-0 rounded-xl border border-white/10 bg-card/5 text-slate-300 hover:bg-card/10 hover:text-white" />
+            <ThemeMenu className="h-auto w-10 shrink-0 rounded-xl border border-sidebar-line bg-sidebar-hover text-sidebar-foreground hover:bg-sidebar-active hover:text-primary" />
           </div>
         </div>
       </aside>
