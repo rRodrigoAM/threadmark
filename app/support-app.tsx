@@ -1495,6 +1495,10 @@ export function SupportApp({
     setNotificationPreviewQueue((current) => current.slice(1));
   }, []);
 
+  const dismissNotificationPreviews = useCallback(() => {
+    setNotificationPreviewQueue([]);
+  }, []);
+
   const openLiveNotification = useCallback(async (notification: NotificationDto) => {
     if (!notification.readAt) {
       try {
@@ -1710,6 +1714,7 @@ export function SupportApp({
         {activeView !== "settings" && activeView !== "inbox" ? (
           <PageHeader
             onOpenMenu={() => setSidebarOpen(true)}
+            onOpenNotificationPreview={dismissNotificationPreviews}
             onOpenNotificationTarget={openNotificationTarget}
             onOpenNotifications={() => navigateToView("notifications")}
             onRefresh={() => void refreshAll()}
