@@ -293,8 +293,8 @@ export interface CategoryListFilters {
 export interface TicketListFilters {
   statuses?: TicketStatus[];
   clientId?: string;
-  /** Undefined includes everyone; null includes only tickets without an assignee. */
-  assigneeId?: string | null;
+  /** Undefined includes everyone; null includes unassigned tickets; arrays include any selected assignee. */
+  assigneeId?: string | null | readonly string[];
   query?: string;
   includeArchived?: boolean;
   productForwardingKind?: ProductForwardingKind;
@@ -303,6 +303,22 @@ export interface TicketListFilters {
   order?: "operational" | "created_desc" | "resolved_desc" | "archived_desc";
   limit?: number;
   offset?: number;
+}
+
+type DashboardAssigneeFilter = string | null | readonly string[] | undefined;
+
+function dashboardAssigneePredicate(
+  column: string,
+  assignee: DashboardAssigneeFilter,
+): { sql: string; parameters: string[] } {
+  if (assignee === undefined) return { sql: "", parameters: [] };
+  if (assignee === null) return { sql: ` AND ${column} IS NULL`, parameters: [] };
+  const ids = [...new Set(typeof assignee === "string" ? [assignee] : assignee)];
+  if (!ids.length) return { sql: "", parameters: [] };
+  return {
+    sql: ` AND ${column} IN (${ids.map(() => "?").join(", ")})`,
+    parameters: ids,
+  };
 }
 
 export interface TicketCapacityLimit {
@@ -7855,8 +7871,15 @@ export class SupportStore {
     if (filters.assigneeId === null) {
       where.push("t.assignee_user_id IS NULL");
     } else if (filters.assigneeId !== undefined) {
-      where.push("t.assignee_user_id = ?");
-      parameters.push(filters.assigneeId);
+      const assigneeIds = typeof filters.assigneeId === "string"
+        ? [filters.assigneeId]
+        : [...new Set(filters.assigneeId)];
+      if (assigneeIds.length) {
+        where.push(
+          `t.assignee_user_id IN (${assigneeIds.map(() => "?").join(", ")})`,
+        );
+        parameters.push(...assigneeIds);
+      }
     }
 
     if (filters.productForwardingKind) {
@@ -8158,6 +8181,71 @@ export class SupportStore {
       ...category,
       ticketCount: this.countCategoryTickets(category.id),
     };
+  }
+
+  updateCategory(
+    categoryId: string,
+    input: {
+      facet: CategoryFacet;
+      label: string;
+      color?: string | null;
+    },
+  ): CategoryCatalogDto {
+    const normalized = normalizeCatalogCategory(input.facet, input.label);
+    if (!normalized) {
+      throw new ValidationError(
+        "A categoria deve descrever o problema ou a área funcional, não o canal, a origem, o formato do anexo ou uma limitação da análise",
+        { facet: input.facet, label: input.label },
+      );
+    }
+
+    return this.database.transaction(() => {
+      const existing = this.database
+        .prepare("SELECT id FROM categories WHERE id = ?")
+        .get(categoryId) as { id: string } | undefined;
+      if (!existing) throw new NotFoundError("Categoria", categoryId);
+
+      const duplicate = this.database
+        .prepare(
+          "SELECT id FROM categories WHERE facet = ? AND slug = ? AND id <> ?",
+        )
+        .get(normalized.facet, normalized.slug, categoryId) as
+        | { id: string }
+        | undefined;
+      if (duplicate) {
+        throw new ConflictError(
+          `Já existe uma categoria chamada “${normalized.label}” na faceta selecionada.`,
+          {
+            categoryId,
+            duplicateCategoryId: duplicate.id,
+            facet: normalized.facet,
+            slug: normalized.slug,
+          },
+        );
+      }
+
+      const updated = this.database
+        .prepare(
+          `UPDATE categories
+           SET facet = ?, slug = ?, label = ?, color = ?, origin = 'manual', updated_at = ?
+           WHERE id = ?
+           RETURNING id, facet, slug, label, color`,
+        )
+        .get(
+          normalized.facet,
+          normalized.slug,
+          normalized.label,
+          input.color ?? null,
+          nowUtc(),
+          categoryId,
+        ) as CategoryRow | undefined;
+      if (!updated) throw new NotFoundError("Categoria", categoryId);
+
+      return {
+        ...this.mapCategory(updated),
+        ticketCount: this.countCategoryTickets(categoryId),
+      };
+    })();
   }
 
   deleteCategory(
@@ -8478,7 +8566,7 @@ export class SupportStore {
 
   getDashboard(
     input?: DashboardPeriodInput,
-    assigneeId?: string | null,
+    assigneeId?: DashboardAssigneeFilter,
   ): DashboardResponse {
     this.validateDashboardAssignee(assigneeId);
     const timeZone = this.workspaceTimeZone();
@@ -8489,14 +8577,12 @@ export class SupportStore {
     const createdRangeParameters = period
       ? [period.fromUtc, period.toUtcExclusive]
       : [];
-    const assigneeSql = assigneeId === null
-      ? " AND t.assignee_user_id IS NULL"
-      : assigneeId === undefined
-        ? ""
-        : " AND t.assignee_user_id = ?";
-    const assigneeParameters = assigneeId === undefined || assigneeId === null
-      ? []
-      : [assigneeId];
+    const assigneePredicate = dashboardAssigneePredicate(
+      "t.assignee_user_id",
+      assigneeId,
+    );
+    const assigneeSql = assigneePredicate.sql;
+    const assigneeParameters = assigneePredicate.parameters;
     const createdScopeSql = `${createdRangeSql}${assigneeSql}`;
     const createdScopeParameters = [
       ...createdRangeParameters,
@@ -8879,7 +8965,7 @@ export class SupportStore {
 
   private getDashboardOperationalSnapshot(
     period: DashboardPeriodDto | null,
-    assigneeId?: string | null,
+    assigneeId?: DashboardAssigneeFilter,
     knownCreated?: number,
     knownResolved?: number,
   ): {
@@ -8888,14 +8974,12 @@ export class SupportStore {
     operations: DashboardOperationalMetricsDto;
     aging: DashboardAgingBucketDto[];
   } {
-    const assigneeSql = assigneeId === null
-      ? " AND t.assignee_user_id IS NULL"
-      : assigneeId === undefined
-        ? ""
-        : " AND t.assignee_user_id = ?";
-    const assigneeParameters = assigneeId === undefined || assigneeId === null
-      ? []
-      : [assigneeId];
+    const assigneePredicate = dashboardAssigneePredicate(
+      "t.assignee_user_id",
+      assigneeId,
+    );
+    const assigneeSql = assigneePredicate.sql;
+    const assigneeParameters = assigneePredicate.parameters;
     const createdRangeSql = period
       ? " AND t.created_at >= ? AND t.created_at < ?"
       : "";
@@ -8931,7 +9015,7 @@ export class SupportStore {
       ? period.toUtcExclusive
       : now;
     const scopedBacklog = this.getDashboardBacklogRows(cutoff, assigneeId);
-    const allBacklog = assigneeId === undefined
+    const allBacklog = assigneeId === undefined || Array.isArray(assigneeId)
       ? scopedBacklog
       : this.getDashboardBacklogRows(cutoff);
     const resolutionRows = this.database.prepare(`
@@ -9028,16 +9112,13 @@ export class SupportStore {
 
   private getDashboardBacklogRows(
     cutoff: string,
-    assigneeId?: string | null,
+    assigneeId?: DashboardAssigneeFilter,
   ): Array<{ created_at: string; assignee_user_id: string | null }> {
-    const assigneeSql = assigneeId === null
-      ? " AND t.assignee_user_id IS NULL"
-      : assigneeId === undefined
-        ? ""
-        : " AND t.assignee_user_id = ?";
-    const assigneeParameters = assigneeId === undefined || assigneeId === null
-      ? []
-      : [assigneeId];
+    const assigneePredicate = dashboardAssigneePredicate(
+      "t.assignee_user_id",
+      assigneeId,
+    );
+    const assigneeSql = assigneePredicate.sql;
     return this.database.prepare(`
       WITH ticket_state_at_cutoff AS (
         SELECT
@@ -9063,20 +9144,27 @@ export class SupportStore {
       SELECT created_at, assignee_user_id
       FROM ticket_state_at_cutoff
       WHERE effective_status NOT IN ('resolved', 'cancelled', 'archived')
-    `).all(cutoff, cutoff, ...assigneeParameters) as Array<{
+    `).all(cutoff, cutoff, ...assigneePredicate.parameters) as Array<{
       created_at: string;
       assignee_user_id: string | null;
     }>;
   }
 
-  private validateDashboardAssignee(assigneeId?: string | null): void {
+  private validateDashboardAssignee(assigneeId?: DashboardAssigneeFilter): void {
     if (assigneeId === undefined || assigneeId === null) return;
+    const ids = [...new Set(typeof assigneeId === "string" ? [assigneeId] : assigneeId)];
+    if (ids.length > 100 || ids.some((id) => !id.trim() || id.length > 200)) {
+      throw new ValidationError("Seleção de responsáveis inválida", { assigneeId });
+    }
+    if (!ids.length) return;
     const user = this.database
-      .prepare("SELECT id FROM local_users WHERE id = ?")
-      .get(assigneeId) as { id: string } | undefined;
-    if (!user) {
+      .prepare(`SELECT id FROM local_users WHERE id IN (${ids.map(() => "?").join(", ")})`)
+      .all(...ids) as Array<{ id: string }>;
+    const validIds = new Set(user.map((row) => row.id));
+    const invalidId = ids.find((id) => !validIds.has(id));
+    if (invalidId) {
       throw new ValidationError("Responsável selecionado no dashboard não existe", {
-        assigneeId,
+        assigneeId: invalidId,
       });
     }
   }
@@ -9173,7 +9261,7 @@ export class SupportStore {
 
   getDashboardExportRows(
     input?: DashboardPeriodInput,
-    assigneeId?: string | null,
+    assigneeId?: DashboardAssigneeFilter,
   ): DashboardExportRowDto[] {
     this.validateDashboardAssignee(assigneeId);
     const timeZone = this.workspaceTimeZone();
@@ -9196,11 +9284,13 @@ export class SupportStore {
            )
          )`
       : "";
-    const assigneeFilter = assigneeId === null
-      ? "AND t.assignee_user_id IS NULL"
-      : assigneeId === undefined
-        ? ""
-        : "AND t.assignee_user_id = ?";
+    const assigneePredicate = dashboardAssigneePredicate(
+      "t.assignee_user_id",
+      assigneeId,
+    );
+    const assigneeFilter = assigneePredicate.sql
+      ? assigneePredicate.sql.replace(/^ AND/, "AND")
+      : "";
     const periodParameters = period
       ? [
           period.fromUtc,
@@ -9211,7 +9301,7 @@ export class SupportStore {
       : [];
     const parameters = [
       ...periodParameters,
-      ...(assigneeId === undefined || assigneeId === null ? [] : [assigneeId]),
+      ...assigneePredicate.parameters,
     ];
     const rows = this.database
       .prepare(

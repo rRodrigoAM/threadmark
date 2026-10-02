@@ -7,11 +7,12 @@ import {
   ApiError,
   addTicketInternalNote,
   attachCategoryToTicket,
+  bulkUpdateTicketStatus,
   createCategory,
   deleteCategory,
   detachCategoryFromTicket,
   getCategories,
-  bulkUpdateTicketStatus,
+  updateCategory,
   createManualTicket,
   deleteTicket,
   deleteTicketInternalNote,
@@ -49,6 +50,7 @@ import {
   type UpsertTicketProductForwardingInput,
   type UpdateTicketMetadataInput,
   type NotificationDto,
+  type UpdateCategoryInput,
 } from "@/shared/contracts";
 import { activeStatuses, configureSupportTimeZone, statusLabels } from "./lib/format";
 
@@ -848,6 +850,13 @@ export function SupportApp({
     [commitTicketSnapshot, persistStatusChange, showToast],
   );
 
+  const handleStatusChange = useCallback(
+    (status: TicketStatus) => {
+      if (currentSelectedId) requestStatusChange(currentSelectedId, status);
+    },
+    [currentSelectedId, requestStatusChange],
+  );
+
   const handleBulkTicketStatusChange = useCallback(
     async (
       ticketIds: string[],
@@ -889,13 +898,6 @@ export function SupportApp({
       }
     },
     [invalidateTicketSnapshot, showToast],
-  );
-
-  const handleStatusChange = useCallback(
-    (status: TicketStatus) => {
-      if (currentSelectedId) requestStatusChange(currentSelectedId, status);
-    },
-    [currentSelectedId, requestStatusChange],
   );
 
   const refreshTicket = useCallback(async () => {
@@ -1086,9 +1088,11 @@ export function SupportApp({
           color: input.color?.trim() || null,
         });
         setCategoryCatalog((current) => {
-          const exists = current.some((category) => category.id === created.id);
-          if (exists) return current;
-          return [...current, created];
+          const index = current.findIndex((category) => category.id === created.id);
+          if (index < 0) return [...current, created];
+          const next = [...current];
+          next[index] = created;
+          return next;
         });
         showToast({
           tone: "success",
@@ -1107,6 +1111,100 @@ export function SupportApp({
       }
     },
     [showToast],
+  );
+
+  const handleUpdateCategory = useCallback(
+    async (categoryId: string, input: UpdateCategoryInput) => {
+      try {
+        const updated = await updateCategory(categoryId, {
+          facet: input.facet,
+          label: input.label.trim(),
+          color: input.color?.trim() || null,
+        });
+        const updatedCategory = {
+          id: updated.id,
+          facet: updated.facet,
+          slug: updated.slug,
+          label: updated.label,
+          color: updated.color,
+        };
+
+        setCategoryCatalog((current) => current.map((category) =>
+          category.id === updated.id ? updated : category,
+        ));
+        setDashboard((current) => current
+          ? {
+              ...current,
+              topCategories: current.topCategories.map((item) =>
+                item.category.id === updated.id
+                  ? { ...item, category: updatedCategory }
+                  : item,
+              ),
+            }
+          : current,
+        );
+
+        // Update only snapshots already held by this UI. The stored category row
+        // is shared by every ticket link, so historical tickets need no rewrite.
+        ticketListSnapshotCoordinatorRef.current.invalidate(TICKET_LIST_SNAPSHOT_KEY);
+        const knownTicketIds = new Set([
+          ...tickets
+            .filter((ticket) => ticket.categories.some((category) => category.id === updated.id))
+            .map((ticket) => ticket.id),
+          ...[...ticketDetailsRef.current]
+            .filter(([, ticket]) => ticket.categories.some((category) => category.id === updated.id))
+            .map(([ticketId]) => ticketId),
+        ]);
+        for (const knownTicketId of knownTicketIds) {
+          ticketSnapshotCoordinatorRef.current.invalidate(knownTicketId);
+        }
+        setTickets((current) => current.map((ticket) => {
+          if (!ticket.categories.some((category) => category.id === updated.id)) {
+            return ticket;
+          }
+          return {
+            ...ticket,
+            categories: ticket.categories.map((category) =>
+              category.id === updated.id ? updatedCategory : category,
+            ),
+          };
+        }));
+        setTicketDetails((current) => {
+          let changed = false;
+          const next = new Map(current);
+          for (const [ticketId, ticket] of current) {
+            if (!ticket.categories.some((category) => category.id === updated.id)) {
+              continue;
+            }
+            changed = true;
+            next.set(ticketId, {
+              ...ticket,
+              categories: ticket.categories.map((category) =>
+                category.id === updated.id ? updatedCategory : category,
+              ),
+            });
+          }
+          if (!changed) return current;
+          ticketDetailsRef.current = next;
+          return next;
+        });
+        showToast({
+          tone: "success",
+          message: `Categoria "${updated.label}" atualizada nos tickets vinculados.`,
+        });
+        return updated;
+      } catch (error) {
+        showToast({
+          tone: "warning",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Não foi possível atualizar a categoria.",
+        });
+        throw error;
+      }
+    },
+    [showToast, tickets],
   );
 
   const handleDeleteCategory = useCallback(
@@ -1618,6 +1716,7 @@ export function SupportApp({
             onOpenTicket={openTicket}
             onAssignTicket={handleUpdateTicketAssignee}
             tickets={tickets}
+            categories={categoryCatalog}
           />
         );
       case "clients":
@@ -1635,6 +1734,7 @@ export function SupportApp({
             loading={loading}
             onCreate={handleCreateCategory}
             onDelete={handleDeleteCategory}
+            onUpdate={handleUpdateCategory}
           />
         );
       case "automations":
@@ -1649,6 +1749,7 @@ export function SupportApp({
       case "dashboard":
         return (
           <DashboardView
+            currentUserId={access?.user.id ?? null}
             dashboard={dashboard}
             loading={loading}
             onOpenInbox={() => navigateToView("kanban")}
@@ -1688,6 +1789,7 @@ export function SupportApp({
     handleAddTicketNote,
     handleBulkTicketStatusChange,
     handleCreateCategory,
+    handleUpdateCategory,
     handleDeleteCategory,
     handleDeleteTicket,
     handleDetachTicketMessage,
@@ -1732,7 +1834,6 @@ export function SupportApp({
         open={sidebarOpen}
         pendingConversations={pendingConversations}
         reviewTickets={reviewTickets}
-        unreadNotifications={unreadNotifications}
         runtime={runtime}
         operatorName={access?.user.displayName ?? "Operador local"}
         operatorRole={
@@ -1762,11 +1863,12 @@ export function SupportApp({
         ) : null}
         {apiError ? <ApiErrorBanner message={apiError} onRetry={() => void refreshAll()} /> : null}
         <div
-          className={`min-h-0 flex-1 bg-muted/30 ${
+          className={`min-h-0 flex-1 bg-muted/30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 ${
             activeView === "conversations" || activeView === "inbox"
               ? "overflow-hidden"
               : "overflow-y-auto"
           }`}
+          key={activeView}
         >
           {pageView}
         </div>

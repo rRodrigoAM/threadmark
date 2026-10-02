@@ -34,6 +34,7 @@ export function KanbanCard({
   selectable,
   selected,
   busy,
+  archiving = false,
   assigning,
   assignees,
   currentUserId,
@@ -50,6 +51,7 @@ export function KanbanCard({
   selectable: boolean;
   selected: boolean;
   busy: boolean;
+  archiving?: boolean;
   assigning: boolean;
   assignees: TicketAssignee[];
   currentUserId: string | null;
@@ -71,6 +73,7 @@ export function KanbanCard({
         "relative flex min-h-41 w-full flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-primary/35 hover:shadow-md",
         selectable && "pl-6",
         selected && "border-primary/70 bg-primary/5 ring-2 ring-primary/10",
+        archiving && "animate-out fade-out slide-out-to-right-1 duration-200 ease-out motion-reduce:animate-none",
         (busy || assigning) && "opacity-70",
       )}
       draggable={draggable}

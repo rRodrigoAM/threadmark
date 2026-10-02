@@ -72,12 +72,13 @@ test("período personalizado valida ordem e gera rótulo e nome de exportação"
 });
 
 test("UI consulta e exporta exatamente o período e responsável selecionados", async () => {
-  const [api, period, view, supportApp, css] = await Promise.all([
+  const [api, period, view, supportApp, css, heatmap] = await Promise.all([
     readFile(new URL("../app/lib/api.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/dashboard-period.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/features/dashboard/components/dashboard-view.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/support-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/features/dashboard/components/dashboard-rhythm-heatmap.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(api, /params\.set\("from", range\.from\)/);
@@ -97,21 +98,49 @@ test("UI consulta e exporta exatamente o período e responsável selecionados", 
   assert.doesNotMatch(view, /Personalizar|Arraste para mover|Ocultar bloco|Restaurar padrão/);
   assert.doesNotMatch(supportApp, /currentUserId=\{access\?\.user\.id \?\? "local"\}/);
   assert.match(view, /getDashboardExport\(range, selectedAssignee\)/);
-  assert.match(view, /Filtrar dashboard por responsável/);
+  assert.match(view, /Selecionar visualização do dashboard/);
+  assert.match(view, /<SelectItem value="team">Toda equipe<\/SelectItem>/);
+  assert.match(view, /<SelectItem disabled=\{!currentUserId\} value="you">Você<\/SelectItem>/);
+  assert.match(view, /if \(viewMode === "you" && currentUserId\) return currentUserId/);
+  assert.match(view, /activity: visibleViewMode === "you"/);
+  assert.match(view, /DashboardRhythmHeatmap/);
+  assert.match(view, /Carregando histórico dos últimos 12 meses/);
+  assert.match(view, /heatmapError/);
+  assert.match(view, /Tentar novamente/);
+  assert.doesNotMatch(
+    view,
+    /loadedHeatmap\?\.assigneeId === currentUserId[\s\S]*\?\s*loadedHeatmap\.data[\s\S]*:\s*currentDashboard\.ticketsByDay/,
+  );
+  assert.match(heatmap, /overflow-x-auto/);
+  assert.match(heatmap, /minGridWidth/);
+  assert.match(heatmap, /minmax\(12px, 1fr\)/);
+  assert.match(heatmap, /role="region"/);
+  assert.match(view, /Seu ritmo de atendimento/);
   assert.match(view, /Atendimento por responsável/);
-  assert.match(view, /Taxa de resolução/);
+  assert.match(view, /team: visibleViewMode === "team" \? \(/);
+  assert.doesNotMatch(view, /Taxa de resolução/);
+  assert.match(view, /Backlog no fechamento/);
   assert.match(view, /Tempo mediano de resolução/);
   assert.match(view, /Saúde da operação/);
-  assert.match(view, /Ainda abertos/);
+  assert.doesNotMatch(view, /Ainda abertos/);
+  assert.match(view, /Backlog há mais de 7 dias/);
   assert.match(view, /Em revisão/);
   assert.doesNotMatch(view, /Backlog no fim do período/);
   assert.doesNotMatch(view, /Envelhecimento do backlog/);
-  assert.match(view, /Tickets por prioridade/);
+  assert.doesNotMatch(view, /Tickets por prioridade/);
   assert.match(view, /vs\. anterior/);
   assert.match(view, /Sem responsável/);
+  assert.match(supportApp, /currentUserId=\{access\?\.user\.id \?\? null\}/);
   assert.match(view, /currentDashboard\.period/);
-  assert.match(view, /Tickets criados e resoluções de/);
-  assert.match(view, /Este número representa a fila atual/);
+  assert.match(view, /Tickets criados e resoluções/);
+  assert.match(view, /aria-label="Filtros ativos"/);
+  assert.match(view, /rounded-xl border border-border bg-linear-to-br from-primary\/13 via-card to-primary\/\[6\.5%\] p-3/);
+  assert.match(view, /Sem categorias neste período/);
+  assert.match(view, /className="grid min-h-14 w-full grid-cols-\[minmax\(0,1fr\)_auto_auto\]/);
+  assert.match(view, /title=\{ticket\.title\}/);
+  assert.match(view, /Esta fila é global/);
+  assert.equal((view.match(/lg:h-\[280px\]/g) ?? []).length, 4);
+  assert.equal((view.match(/lg:min-h-0 lg:flex-1 lg:overflow-y-auto/g) ?? []).length, 2);
   assert.match(view, /Todo o período · gráfico dos últimos 14 dias/);
   assert.match(view, /aria-live="polite"/);
   assert.match(view, /lg:grid-cols-\[minmax\(210px,1fr\)_auto\]/);

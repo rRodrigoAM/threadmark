@@ -458,6 +458,35 @@ test("dashboard filtra indicadores por responsável e preserva a visão da equip
     groups: 1,
   });
 
+  const selectedTogether = store.getDashboard(
+    { from: "2026-07-01", to: "2026-07-02" },
+    ["dashboard-user-a", "dashboard-user-b"],
+  );
+  assert.deepEqual(selectedTogether.totals, {
+    tickets: 2,
+    open: 1,
+    needsReview: 1,
+    resolved: 2,
+    orphanDemands: 1,
+    clients: 2,
+    groups: 2,
+  });
+  assert.deepEqual(
+    selectedTogether.recentTickets.map((ticket) => ticket.id),
+    ["ticket-inside-open", "ticket-inside-resolved"],
+  );
+  assert.equal(selectedTogether.operations.backlog, 2);
+  assert.equal(selectedTogether.operations.unassignedBacklog, 0);
+
+  const multiAssigneeResponse = await app.request(
+    "/api/dashboard?from=2026-07-01&to=2026-07-02&assigneeId=dashboard-user-a&assigneeId=dashboard-user-b",
+  );
+  assert.equal(multiAssigneeResponse.status, 200);
+  assert.deepEqual(
+    (await multiAssigneeResponse.json() as { totals: typeof selectedTogether.totals }).totals,
+    selectedTogether.totals,
+  );
+
   const unassignedResponse = await app.request(
     "/api/dashboard?from=2026-07-01&to=2026-07-02&assigneeId=unassigned",
   );
@@ -563,6 +592,17 @@ test("API valida o intervalo e exporta CSV readonly com resoluções históricas
   assert.match(assignedCsv, /ticket-inside-resolved/);
   assert.doesNotMatch(assignedCsv, /ticket-inside-open/);
   assert.doesNotMatch(assignedCsv, /ticket-inside-archived/);
+
+  const multiAssigneeResponse = await app.request(
+    "/api/dashboard/export?from=2026-07-01&to=2026-07-02&assigneeId=dashboard-user-a&assigneeId=dashboard-user-b",
+  );
+  const multiAssigneeCsv = Buffer.from(
+    new Uint8Array(await multiAssigneeResponse.arrayBuffer()).subarray(3),
+  ).toString("utf8");
+  assert.equal(multiAssigneeResponse.status, 200);
+  assert.match(multiAssigneeCsv, /ticket-inside-resolved/);
+  assert.match(multiAssigneeCsv, /ticket-inside-open/);
+  assert.doesNotMatch(multiAssigneeCsv, /ticket-inside-archived/);
 });
 
 test("dashboard interpreta o período no fuso configurado do workspace", () => {

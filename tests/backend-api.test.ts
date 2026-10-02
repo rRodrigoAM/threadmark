@@ -333,6 +333,110 @@ test("API cria categoria personalizada e permite vincular e remover do ticket", 
   );
 });
 
+test("API edita a categoria vinculada sem regravar os tickets históricos", async () => {
+  const { app, database, store, ticketId, groupId, participantId } = apiFixture();
+  const category = store.createCategory({
+    facet: "product",
+    label: "Checkout legado",
+    color: "#5b56d4",
+  });
+  const secondMessage = store.upsertMessage({
+    externalId: "api-category-edit-message-2",
+    groupId,
+    senderId: participantId,
+    occurredAt: "2026-07-16T16:00:00.000Z",
+    text: "Outra demanda sobre checkout.",
+    messageType: "text",
+    triageKind: "demand",
+  });
+  const secondTicket = store.createTicket({
+    groupId,
+    sourceMessageId: secondMessage.id,
+    title: "Outra falha no checkout",
+    summary: "Outra demanda sobre checkout.",
+  });
+  store.attachCategoryToTicket(ticketId, category.id, "Teste");
+  store.attachCategoryToTicket(secondTicket.id, category.id, "Teste");
+
+  const timestampsBefore = [ticketId, secondTicket.id].map((id) =>
+    (database.prepare("SELECT updated_at FROM tickets WHERE id = ?").get(id) as { updated_at: string }).updated_at,
+  );
+  const timelineLengthsBefore = [ticketId, secondTicket.id].map((id) =>
+    store.getTicketDetail(id).timeline.length,
+  );
+
+  const response = await app.request(`/api/categories/${category.id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      facet: "symptom",
+      label: "Falha no checkout",
+      color: "#e85d75",
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const updated = (await response.json()) as {
+    id: string;
+    facet: string;
+    label: string;
+    color: string | null;
+    ticketCount: number;
+  };
+  assert.deepEqual(updated, {
+    id: category.id,
+    facet: "symptom",
+    slug: "falha-no-checkout",
+    label: "Falha no checkout",
+    color: "#e85d75",
+    ticketCount: 2,
+  });
+  for (const id of [ticketId, secondTicket.id]) {
+    assert.deepEqual(store.getTicketDetail(id).categories, [{
+      id: category.id,
+      facet: "symptom",
+      slug: "falha-no-checkout",
+      label: "Falha no checkout",
+      color: "#e85d75",
+    }]);
+  }
+  assert.equal(
+    (database.prepare("SELECT COUNT(*) AS count FROM ticket_categories WHERE category_id = ?").get(category.id) as { count: number }).count,
+    2,
+  );
+  assert.deepEqual(
+    [ticketId, secondTicket.id].map((id) =>
+      (database.prepare("SELECT updated_at FROM tickets WHERE id = ?").get(id) as { updated_at: string }).updated_at,
+    ),
+    timestampsBefore,
+    "editar a categoria não atualiza nem regrava as linhas dos tickets",
+  );
+  assert.deepEqual(
+    [ticketId, secondTicket.id].map((id) => store.getTicketDetail(id).timeline.length),
+    timelineLengthsBefore,
+    "a edição de taxonomia não cria um evento artificial em cada ticket",
+  );
+});
+
+test("API impede nome duplicado ao editar categoria dentro da mesma faceta", async () => {
+  const { app, store } = apiFixture();
+  const first = store.createCategory({ facet: "reason", label: "Dúvida sobre cobrança" });
+  const second = store.createCategory({ facet: "reason", label: "Solicitação de acesso" });
+
+  const response = await app.request(`/api/categories/${second.id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      facet: first.facet,
+      label: first.label,
+      color: null,
+    }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(store.listCategories().find((item) => item.id === second.id)?.label, "Solicitação de acesso");
+});
+
 test("API exclui categoria sem uso e exige substituição segura quando há tickets vinculados", async () => {
   const { app, store, ticketId } = apiFixture();
   const oldCategory = store.createCategory({

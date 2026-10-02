@@ -72,6 +72,7 @@ test("Kanban separa tickets ativos dos arquivados sem contaminar a carga global"
   assert.match(view, /em todos os tickets arquivados/);
   assert.match(view, /label: "Cancelados"/);
   assert.match(view, /statuses: \["cancelled"\]/);
+  assert.match(view, /bg-linear-to-br from-primary\/13 via-card to-primary\/\[6\.5%\]/);
   assert.match(view, /visibleCancelledTickets/);
 });
 
@@ -101,11 +102,19 @@ test("Kanban pesquisa cards por título, grupo ou solicitante em cada visão", a
 });
 
 test("Kanban oferece seleção acessível em lote, arquivo e restauração sem exclusão", async () => {
-  const [api, app, view] = await Promise.all([
+  const [api, app, view, card, detail] = await Promise.all([
     readFile(new URL("../app/lib/api.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/support-app.tsx", import.meta.url), "utf8"),
     readFile(
       new URL("../app/features/kanban/components/kanban-view.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/features/kanban/components/kanban-card.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/features/tickets/components/ticket-detail.tsx", import.meta.url),
       "utf8",
     ),
   ]);
@@ -121,6 +130,10 @@ test("Kanban oferece seleção acessível em lote, arquivo e restauração sem e
   assert.match(view, /KANBAN_BULK_SELECTION_LIMIT/);
   assert.match(view, /Arquivar \$\{selectedVisibleIds\.length \|\| ""\}/);
   assert.match(view, /Restaurar \$\{selectedVisibleIds\.length \|\| ""\}/);
+  assert.match(view, /setArchivingIds\(new Set\(selectedVisibleIds\)\)/);
+  assert.match(card, /animate-out fade-out slide-out-to-right-1 duration-200 ease-out/);
+  assert.match(detail, /previousTicketStatusRef[\s\S]*ticket\.status !== "archived"/);
+  assert.match(detail, /animate-in fade-in zoom-in-95 duration-200 ease-out/);
   assert.match(view, /Nenhum dado foi excluído|sem excluir mensagens/);
   assert.doesNotMatch(view, /deleteTicket|Excluir permanentemente|Deletar/);
 
@@ -167,24 +180,19 @@ test("navegação das tabs segue o padrão ARIA com setas, Home e End", () => {
   assert.equal(getNextKanbanTab("active", "Enter"), null);
 });
 
-test("arquivo e restauração mantêm total e página própria de Resolvidos coerentes", async () => {
+test("coluna de Resolvidos mantém snapshot e paginação própria coerentes", async () => {
   const view = await readFile(
     new URL("../app/features/kanban/components/kanban-view.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(view, /setResolvedTickets\(\(current\) =>\s*current\.filter/);
-  assert.match(view, /setResolvedTotal\(\(current\) => Math\.max\(0, current - selectedResolvedCount\)\)/);
-  assert.match(view, /const restoredResolved = updated\.filter/);
-  assert.match(view, /mergeTickets\(current, restoredResolved, true\)/);
-  assert.match(view, /setResolvedTotal\(\(current\) => current \+ restoredResolved\.length\)/);
   assert.match(view, /void loadResolved\(true\)/);
   assert.match(view, /void loadResolved\(false\)/);
   assert.match(view, /resolvedRequestRef\.current !== requestId/);
   assert.match(view, /ticketStatusSnapshotRef/);
   assert.match(view, /const newlyResolved = tickets\.filter/);
   assert.match(view, /const reopenedIds = new Set/);
-  assert.match(view, /!resolvedLoaded \|\| resolvedLoading/);
+  assert.match(view, /loading \|\| resolvedLoaded \|\| resolvedLoading/);
 });
 
 test("Arquivados invalida páginas antigas e bloqueia operações durante recarga", async () => {
@@ -196,8 +204,6 @@ test("Arquivados invalida páginas antigas e bloqueia operações durante recarg
   assert.match(view, /const archivedRequestRef = useRef\(0\)/);
   assert.match(view, /archivedRequestRef\.current !== requestId/);
   assert.match(view, /void loadArchived\(true\)/);
-  assert.match(view, /mode === "archived" && archivedLoading/);
-  assert.match(view, /archivedLoading \|\| !archivedTickets\.length/);
   assert.match(view, /disabled=\{archivedLoading \|\| bulkBusy\}/);
 });
 
@@ -266,6 +272,7 @@ test("controles e grade de arquivados se adaptam a telas estreitas", async () =>
   assert.match(view, /grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5/);
   assert.doesNotMatch(view, /min-w-\[920px\]/);
   assert.match(card, /selected && "border-primary\/70 bg-primary\/5 ring-2 ring-primary\/10"/);
+  assert.match(card, /aria-pressed=\{selectable \? selected : undefined\}/);
   assert.match(card, /focus-visible:ring-2 focus-visible:ring-primary\/35/);
   assert.doesNotMatch(css, /\.kanban-/);
 });

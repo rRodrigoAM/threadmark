@@ -215,7 +215,7 @@ test("dashboard usa donut para status e barras para categorias com Shadcn Charts
   assert.match(source, /DashboardHorizontalBars items=\{categoryItems\}/);
   assert.doesNotMatch(source, /DashboardHorizontalBars items=\{statusItems\}/);
   assert.doesNotMatch(source, /dashboard-(?:daily|horizontal)-chart/);
-  assert.match(viewSource, /<div className="grid gap-1\.5">/);
+  assert.match(viewSource, /<div className="grid gap-1\.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">/);
   assert.match(viewSource, /rounded-lg border border-border bg-background px-2/);
 });
 

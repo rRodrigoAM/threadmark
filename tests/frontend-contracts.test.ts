@@ -216,6 +216,7 @@ test("shell mantém sidebar curta e controles interativos visualmente consistent
   assert.match(sidebar, /w-\[238px\]/);
   assert.match(sidebar, /-translate-x-full[\s\S]*md:translate-x-0/);
   assert.match(sidebar, /min-h-0 flex-1 overflow-y-auto/);
+  assert.doesNotMatch(sidebar, /label: "Notificações"/);
   assert.match(settings, /shrink-0 cursor-pointer items-center/);
   assert.match(settings, /grid gap-4 md:grid-cols-3/);
 });

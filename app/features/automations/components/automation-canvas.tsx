@@ -3,8 +3,6 @@
 import "@xyflow/react/dist/style.css";
 
 import {
-  Background,
-  BackgroundVariant,
   Controls,
   MiniMap,
   Panel,
@@ -100,6 +98,8 @@ export function AutomationCanvas({
   onRunDryRun,
 }: AutomationCanvasProps) {
   const { resolvedTheme } = useTheme();
+  const canvasBackground = resolvedTheme === "dark" ? "#0F1621" : "#F3F5F8";
+  const canvasDots = resolvedTheme === "dark" ? "#303C4E" : "#CCD5E0";
   const instanceRef = useRef<ReactFlowInstance<AutomationFlowNode, AutomationFlowEdge> | null>(null);
   const draggingRef = useRef(false);
   const issueNodeIds = useMemo(
@@ -270,6 +270,11 @@ export function AutomationCanvas({
         "relative h-full min-h-[500px] min-w-0 overflow-hidden rounded-xl border bg-background",
         !definition.nodes.length && "grid place-items-center",
       )}
+      style={{
+        backgroundColor: canvasBackground,
+        backgroundImage: `radial-gradient(circle, ${canvasDots} 1px, transparent 1.2px)`,
+        backgroundSize: "22px 22px",
+      }}
       onDragOver={(event) => {
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
@@ -292,7 +297,7 @@ export function AutomationCanvas({
         edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ maxZoom: 1, padding: 0.25 }}
-        minZoom={0.35}
+        minZoom={0.6}
         nodes={renderedNodes}
         nodeTypes={nodeTypes}
         onConnect={connect}
@@ -304,13 +309,15 @@ export function AutomationCanvas({
         onNodesChange={changeNodes}
         onPaneClick={() => onSelectNode(null)}
         proOptions={{ hideAttribution: true }}
+        style={{ backgroundColor: "transparent" }}
       >
-        <Background color="var(--border)" gap={22} size={1.2} variant={BackgroundVariant.Dots} />
         <Controls className="!overflow-hidden !rounded-lg !border !border-border !shadow-sm" />
         <MiniMap
           className="!rounded-lg !border !border-border !bg-card max-[760px]:!hidden"
           maskColor="color-mix(in oklch, var(--muted), transparent 20%)"
           nodeColor="var(--primary)"
+          offsetScale={12}
+          position="bottom-right"
         />
         {dryRunOpen ? (
           <Panel className="!m-3" position="top-right">
