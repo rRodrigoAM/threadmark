@@ -84,6 +84,8 @@ export interface CreateCategoryInput {
   color?: string | null;
 }
 
+export type UpdateCategoryInput = CreateCategoryInput;
+
 export interface DeleteCategoryInput {
   replacementCategoryId?: string | null;
 }

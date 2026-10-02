@@ -159,12 +159,39 @@ export function TicketDetail({
   const [metadataEditorOpen, setMetadataEditorOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [archiveTransition, setArchiveTransition] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const categorySectionRef = useRef<HTMLElement>(null);
   const noteComposerRef = useRef<HTMLTextAreaElement>(null);
   const followLatestRef = useRef(true);
   const previousTicketIdRef = useRef<string | null>(null);
+  const previousTicketStatusRef = useRef<{
+    id: string;
+    status: TicketStatus;
+  } | null>(null);
+  const observedTicketId = ticket?.id ?? null;
+  const observedTicketStatus = ticket?.status ?? null;
+
+  useEffect(() => {
+    const previous = previousTicketStatusRef.current;
+    previousTicketStatusRef.current = observedTicketId && observedTicketStatus
+      ? { id: observedTicketId, status: observedTicketStatus }
+      : null;
+    if (
+      !observedTicketId ||
+      !observedTicketStatus ||
+      previous?.id !== observedTicketId ||
+      previous.status === "archived" ||
+      observedTicketStatus !== "archived"
+    ) {
+      return;
+    }
+
+    setArchiveTransition(true);
+    const timeout = window.setTimeout(() => setArchiveTransition(false), 240);
+    return () => window.clearTimeout(timeout);
+  }, [observedTicketId, observedTicketStatus]);
 
   useEffect(() => {
     if (!moreMenuOpen) return;
@@ -318,7 +345,15 @@ export function TicketDetail({
         <div className="min-w-44 flex-1 max-[900px]:w-[calc(100%-50px)] max-[900px]:min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-bold text-primary">#{ticket.number}</span>
-            <StatusPill status={ticket.status} />
+            <span
+              className={
+                archiveTransition
+                  ? "animate-in fade-in zoom-in-95 duration-200 ease-out motion-reduce:animate-none"
+                  : undefined
+              }
+            >
+              <StatusPill status={ticket.status} />
+            </span>
             <PriorityPill priority={ticket.priority} />
             {ticket.assignmentPending ? (
               <Badge className="h-5 border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-700">

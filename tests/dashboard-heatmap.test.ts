@@ -166,21 +166,23 @@ test("nível do quadrado escurece conforme o volume diário", () => {
   assert.equal(dashboardHeatmapLevel(9, 0), 0);
 });
 
-test("componente renderiza grade única com rótulos posicionados por semana", async () => {
+test("mapa de atendimento renderiza semanas e permite rolagem em telas estreitas", async () => {
   const component = await readFile(
     new URL(
-      "../app/features/dashboard/components/dashboard-activity-heatmap.tsx",
+      "../app/features/dashboard/components/dashboard-rhythm-heatmap.tsx",
       import.meta.url,
     ),
     "utf8",
   );
 
-  assert.match(component, /HEATMAP_MONTH_WINDOW = 12/);
-  assert.match(component, /HEATMAP_WEEK_PX = 18/);
+  assert.match(component, /buildDashboardHeatmap\(data, \{ referenceDate \}\)/);
   assert.match(component, /heatmap\.labels\.map/);
-  assert.match(component, /label\.weekIndex \* HEATMAP_WEEK_PX/);
+  assert.match(component, /label\.weekIndex \/ heatmap\.weeks\.length/);
   assert.match(component, /grid-flow-col grid-rows-7/);
-  assert.match(component, /monthLabels = \[/);
-  assert.match(component, /"set\."/, );
+  assert.match(component, /const months = \[/);
+  assert.match(component, /"set"/);
   assert.match(component, /!day\.inWindow/);
+  assert.match(component, /overflow-x-auto/);
+  assert.match(component, /minGridWidth/);
+  assert.match(component, /minmax\(12px, 1fr\)/);
 });

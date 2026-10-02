@@ -1,6 +1,5 @@
 import {
   BarChart3,
-  Bell,
   ChevronLeft,
   CircleGauge,
   LayoutDashboard,
@@ -34,7 +33,6 @@ const operationItems: NavItem[] = [
   { id: "conversations", label: "Conversas", icon: MessagesSquare },
   { id: "kanban", label: "Kanban", icon: LayoutDashboard },
   { id: "automations", label: "Automações", icon: Workflow },
-  { id: "notifications", label: "Notificações", icon: Bell },
 ];
 
 const organizationItems: NavItem[] = [
@@ -57,7 +55,6 @@ type SidebarProps = {
   open: boolean;
   pendingConversations: number;
   reviewTickets: number;
-  unreadNotifications: number;
   runtime: RuntimeState | null;
   operatorName: string;
   operatorRole: string;
@@ -132,7 +129,6 @@ function NavGroup({
   onNavigate,
   pendingConversations,
   reviewTickets,
-  unreadNotifications,
 }: {
   title: string;
   items: NavItem[];
@@ -140,7 +136,6 @@ function NavGroup({
   onNavigate: (view: ViewId) => void;
   pendingConversations: number;
   reviewTickets: number;
-  unreadNotifications: number;
 }) {
   return (
     <div className="mb-5">
@@ -153,8 +148,6 @@ function NavGroup({
               ? pendingConversations
               : item.id === "kanban"
                 ? reviewTickets
-                : item.id === "notifications"
-                  ? unreadNotifications
                 : null;
           return (
             <Button
@@ -252,7 +245,6 @@ export function Sidebar(props: SidebarProps) {
             onNavigate={props.onNavigate}
             pendingConversations={props.pendingConversations}
             reviewTickets={props.reviewTickets}
-            unreadNotifications={props.unreadNotifications}
           />
           <NavGroup
             title="Organização"
@@ -261,7 +253,6 @@ export function Sidebar(props: SidebarProps) {
             onNavigate={props.onNavigate}
             pendingConversations={props.pendingConversations}
             reviewTickets={props.reviewTickets}
-            unreadNotifications={props.unreadNotifications}
           />
           <NavGroup
             title="Insights"
@@ -270,7 +261,6 @@ export function Sidebar(props: SidebarProps) {
             onNavigate={props.onNavigate}
             pendingConversations={props.pendingConversations}
             reviewTickets={props.reviewTickets}
-            unreadNotifications={props.unreadNotifications}
           />
           <NavGroup
             title="Sistema"
@@ -279,7 +269,6 @@ export function Sidebar(props: SidebarProps) {
             onNavigate={props.onNavigate}
             pendingConversations={props.pendingConversations}
             reviewTickets={props.reviewTickets}
-            unreadNotifications={props.unreadNotifications}
           />
         </div>
 

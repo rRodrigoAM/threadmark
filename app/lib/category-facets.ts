@@ -9,6 +9,15 @@ export const categoryFacetLabels: Record<CategoryFacetType, string> = {
   resolution: "Resolução",
 };
 
+export const categoryFacetAllLabels: Record<CategoryFacetType, string> = {
+  reason: "Todos os motivos",
+  product: "Todos os produtos",
+  platform: "Todas as plataformas",
+  symptom: "Todos os sintomas",
+  root_cause: "Todas as causas raiz",
+  resolution: "Todas as resoluções",
+};
+
 export const categoryCreationFacets: CategoryFacetType[] = [
   "reason",
   "product",

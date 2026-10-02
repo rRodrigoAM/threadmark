@@ -393,6 +393,8 @@ const categoryCreateInputSchema = z
   })
   .strict();
 
+const categoryUpdateInputSchema = categoryCreateInputSchema;
+
 const categoryDeleteInputSchema = z
   .object({
     replacementCategoryId: z.string().trim().min(1).max(200).optional().nullable(),
@@ -610,7 +612,7 @@ function runtimeFromFile(
 
 function dashboardQueryFromUrl(url: URL): {
   period: DashboardPeriodInput | undefined;
-  assigneeId: string | null | undefined;
+  assigneeId: string | readonly string[] | null | undefined;
 } {
   const from = url.searchParams.get("from")?.trim() || null;
   const to = url.searchParams.get("to")?.trim() || null;
@@ -622,20 +624,25 @@ function dashboardQueryFromUrl(url: URL): {
       });
     }
   }
-  const hasAssignee = url.searchParams.has("assigneeId");
-  const rawAssignee = url.searchParams.get("assigneeId")?.trim() ?? "";
-  if (hasAssignee && !rawAssignee) {
+  const rawAssignees = url.searchParams.getAll("assigneeId").map((value) => value.trim());
+  if (rawAssignees.some((value) => !value)) {
     throw new ValidationError("Informe um responsável válido para filtrar o dashboard");
   }
-  if (rawAssignee.length > 200) {
+  if (rawAssignees.some((value) => value.length > 200) || rawAssignees.length > 100) {
     throw new ValidationError("Identificador de responsável inválido");
+  }
+  const assignees = [...new Set(rawAssignees)];
+  if (assignees.includes("unassigned") && assignees.length > 1) {
+    throw new ValidationError("Não é possível combinar a fila sem responsável com pessoas específicas");
   }
   return {
     period: from && to ? { from, to } : undefined,
-    assigneeId: hasAssignee
-      ? rawAssignee === "unassigned"
+    assigneeId: assignees.length
+      ? assignees.length === 1 && assignees[0] === "unassigned"
         ? null
-        : rawAssignee
+        : assignees.length === 1
+          ? assignees[0]
+          : assignees
       : undefined,
   };
 }
@@ -2195,6 +2202,13 @@ function createApiAppInternal(
   app.post("/api/categories", async (context) => {
     const input = categoryCreateInputSchema.parse(await context.req.json());
     return context.json(store.createCategory(input), 201);
+  });
+
+  app.put("/api/categories/:id", async (context) => {
+    const input = categoryUpdateInputSchema.parse(await context.req.json());
+    return context.json(
+      store.updateCategory(context.req.param("id"), input),
+    );
   });
 
   app.delete("/api/categories/:id", async (context) => {

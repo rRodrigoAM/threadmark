@@ -1,8 +1,10 @@
 import {
   Archive,
+  ArchiveRestore,
   CheckCircle2,
   Columns3,
   FilterX,
+  ListChecks,
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
@@ -14,7 +16,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getArchivedTickets, getResolvedTickets } from "@/app/lib/api";
-import { categoryFacetLabels } from "@/app/lib/category-facets";
+import {
+  categoryFacetAllLabels,
+  categoryFacetLabels,
+} from "@/app/lib/category-facets";
 import type {
   CategoryFacetType,
   TicketAssignee,
@@ -23,6 +28,11 @@ import type {
   TicketSummary,
 } from "@/app/lib/types";
 import { matchesTicketSearch } from "@/app/lib/ticket-search";
+import {
+  KANBAN_BULK_SELECTION_LIMIT,
+  toggleAllVisibleKanbanTickets,
+  toggleKanbanSelection,
+} from "@/app/lib/kanban-selection";
 import { getNextKanbanTab, type KanbanTab } from "@/app/lib/kanban-tabs";
 import { Button } from "@/app/components/ui/button";
 import { Card } from "@/app/components/ui/card";
@@ -143,6 +153,7 @@ export function KanbanView({
   onCreateManualTicket,
   canCreateTicket,
   onMoveTicket,
+  onBulkStatusChange,
   assignees,
   currentUserId,
   canAssignTicket,
@@ -156,6 +167,10 @@ export function KanbanView({
   onCreateManualTicket: () => void;
   canCreateTicket: boolean;
   onMoveTicket: (id: string, status: TicketStatus) => void;
+  onBulkStatusChange: (
+    ticketIds: string[],
+    status: "archived" | "resolved",
+  ) => Promise<TicketSummary[] | null>;
   assignees: TicketAssignee[];
   currentUserId: string | null;
   canAssignTicket: boolean;
@@ -173,6 +188,12 @@ export function KanbanView({
     {},
   );
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [archivingIds, setArchivingIds] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const [columnLimits, setColumnLimits] =
     useState<Record<string, number>>(initialColumnLimits);
   const [archivedVisibleCount, setArchivedVisibleCount] =
@@ -294,6 +315,24 @@ export function KanbanView({
     0,
     archivedVisibleCount,
   );
+  const visibleResolvedTickets = filteredResolvedTickets.slice(
+    0,
+    columnLimits.done ?? KANBAN_PAGE_SIZE,
+  );
+  const visibleCancelledTickets = sortTickets(
+    filteredActiveTickets.filter((ticket) => ticket.status === "cancelled"),
+    "active",
+    "cancelled",
+  ).slice(0, columnLimits.cancelled ?? KANBAN_PAGE_SIZE);
+  const selectableTickets = mode === "active"
+    ? [...visibleResolvedTickets, ...visibleCancelledTickets]
+    : visibleArchivedTickets;
+  const selectableIds = new Set(selectableTickets.map((ticket) => ticket.id));
+  const selectedVisibleIds = [...selectedIds].filter((ticketId) =>
+    selectableIds.has(ticketId),
+  );
+  const allVisibleSelected = selectableTickets.length > 0 &&
+    selectableTickets.every((ticket) => selectedIds.has(ticket.id));
   const loadResolved = useCallback(async (reset: boolean) => {
     if (resolvedLoading && !reset) return;
     const requestId = resolvedRequestRef.current + 1;
@@ -416,6 +455,9 @@ export function KanbanView({
     setQuery(nextQuery);
     setColumnLimits(initialColumnLimits);
     setArchivedVisibleCount(KANBAN_PAGE_SIZE);
+    setSelectedIds(new Set());
+    setBulkError(null);
+    setSelectionNotice(null);
     if (mode === "archived") {
       setArchivedLoading(true);
       if (archivedSearchTimerRef.current !== null) {
@@ -436,11 +478,17 @@ export function KanbanView({
   function updateAssigneeFilter(value: string) {
     setAssigneeFilter(value);
     resetFilterSideEffects();
+    setSelectedIds(new Set());
+    setBulkError(null);
+    setSelectionNotice(null);
   }
 
   function updateCategoryFilter(facet: CategoryFacetType, value: string) {
     setCategoryFilters((current) => ({ ...current, [facet]: value }));
     resetFilterSideEffects();
+    setSelectedIds(new Set());
+    setBulkError(null);
+    setSelectionNotice(null);
   }
 
   function clearKanbanFilters() {
@@ -448,6 +496,9 @@ export function KanbanView({
     setAssigneeFilter("all");
     setCategoryFilters({});
     resetFilterSideEffects();
+    setSelectedIds(new Set());
+    setBulkError(null);
+    setSelectionNotice(null);
     if (mode === "archived") {
       setArchivedLoading(true);
       if (archivedSearchTimerRef.current !== null) {
@@ -468,6 +519,10 @@ export function KanbanView({
     setMode(nextMode);
     setColumnLimits(initialColumnLimits);
     setArchivedVisibleCount(KANBAN_PAGE_SIZE);
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setBulkError(null);
+    setSelectionNotice(null);
     if (nextMode === "archived") {
       setAssigneeFilter("all");
       setCategoryFilters({});
@@ -497,19 +552,163 @@ export function KanbanView({
     (nextMode === "active" ? activeTabRef : archivedTabRef).current?.focus();
   }
 
+  function toggleSelectionMode() {
+    setSelectionMode((current) => !current);
+    setSelectedIds(new Set());
+    setBulkError(null);
+    setSelectionNotice(null);
+  }
+
+  function toggleTicket(ticketId: string) {
+    const result = toggleKanbanSelection(selectedIds, ticketId);
+    setSelectedIds(result.selectedIds);
+    setSelectionNotice(result.limitReached
+      ? `O limite é de ${KANBAN_BULK_SELECTION_LIMIT} tickets por operação.`
+      : null);
+  }
+
+  function toggleAllVisible() {
+    const result = toggleAllVisibleKanbanTickets(
+      selectedIds,
+      selectableTickets.map((ticket) => ticket.id),
+    );
+    setSelectedIds(result.selectedIds);
+    setSelectionNotice(result.limitReached
+      ? `Foram selecionados os primeiros ${KANBAN_BULK_SELECTION_LIMIT} tickets visíveis. Esse é o limite por operação.`
+      : null);
+  }
+
+  async function runBulkAction() {
+    if (!selectedVisibleIds.length || bulkBusy) return;
+    if (mode === "active" && (!resolvedLoaded || resolvedLoading)) {
+      setSelectionNotice("Aguarde a atualização da coluna Resolvidos para continuar.");
+      return;
+    }
+    if (mode === "archived" && archivedLoading) {
+      setSelectionNotice("Aguarde a atualização dos tickets arquivados para continuar.");
+      return;
+    }
+    if (selectedVisibleIds.length > KANBAN_BULK_SELECTION_LIMIT) {
+      setSelectionNotice(
+        `O limite é de ${KANBAN_BULK_SELECTION_LIMIT} tickets por operação.`,
+      );
+      return;
+    }
+    setBulkBusy(true);
+    setBulkError(null);
+    const targetStatus = mode === "active" ? "archived" : "resolved";
+    if (targetStatus === "archived") {
+      setArchivingIds(new Set(selectedVisibleIds));
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 200));
+    }
+    const selectedResolvedCount = selectedVisibleIds.filter((ticketId) =>
+      visibleResolvedTickets.some((ticket) => ticket.id === ticketId),
+    ).length;
+    try {
+      const updated = await onBulkStatusChange(selectedVisibleIds, targetStatus);
+      if (!updated) {
+        setBulkError("A operação não foi concluída. Tente novamente.");
+        return;
+      }
+      if (targetStatus === "archived") {
+        const updatedIds = new Set(updated.map((ticket) => ticket.id));
+        setResolvedTickets((current) =>
+          current.filter((ticket) => !updatedIds.has(ticket.id)),
+        );
+        setResolvedTotal((current) => Math.max(0, current - selectedResolvedCount));
+        if (archivedLoaded) {
+          setArchivedTickets((current) => mergeTickets(current, updated, true));
+          setArchivedTotal((current) => current + updated.length);
+        }
+      } else {
+        const updatedIds = new Set(updated.map((ticket) => ticket.id));
+        setArchivedTickets((current) =>
+          current.filter((ticket) => !updatedIds.has(ticket.id)),
+        );
+        setArchivedTotal((current) => Math.max(0, current - updated.length));
+        const restoredResolved = updated.filter((ticket) => ticket.status === "resolved");
+        setResolvedTickets((current) =>
+          sortTickets(mergeTickets(current, restoredResolved, true), "active", "done")
+            .slice(0, KANBAN_PAGE_SIZE),
+        );
+        setResolvedTotal((current) => current + restoredResolved.length);
+      }
+      void loadResolved(true);
+      void loadArchived(true);
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+      setSelectionNotice(null);
+    } finally {
+      setArchivingIds(new Set());
+      setBulkBusy(false);
+    }
+  }
+
   if (loading) return <LoadingState label="Organizando o Kanban…" />;
 
   return (
     <div className="min-h-full w-full overflow-x-hidden px-4 py-4 sm:px-5 sm:py-5">
       <Card className="mb-4 grid gap-3 rounded-xl border border-border bg-card p-3 shadow-sm" variant="unstyled">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-            <Columns3 size={18} />
-          </span>
-          <p className="flex min-w-0 flex-col">
-            <strong className="text-sm font-semibold text-foreground">Fluxo operacional</strong>
-            <small className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Arquivar organiza o Kanban sem excluir mensagens, anexos ou investigações.</small>
-          </p>
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+              <Columns3 size={18} />
+            </span>
+            <p className="flex min-w-0 flex-col">
+              <strong className="text-sm font-semibold text-foreground">Fluxo operacional</strong>
+              <small className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Arquivar organiza o Kanban sem excluir mensagens, anexos ou investigações.</small>
+            </p>
+          </div>
+          <div
+            aria-label="Visão do Kanban"
+            className="inline-flex h-9 w-full min-w-0 items-center gap-1 rounded-lg border border-border bg-muted p-1 sm:w-auto"
+            role="tablist"
+          >
+            <Button
+              aria-controls="kanban-active-panel"
+              aria-selected={mode === "active"}
+              className={cn(
+                "h-7 min-w-0 flex-1 gap-1.5 px-2.5 text-xs sm:flex-none",
+                mode === "active" && "bg-background text-primary shadow-sm hover:bg-background",
+              )}
+              id="kanban-active-tab"
+              onClick={() => switchMode("active")}
+              onKeyDown={(event) => handleTabKeyDown(event, "active")}
+              ref={activeTabRef}
+              role="tab"
+              tabIndex={mode === "active" ? 0 : -1}
+              type="button"
+              variant="ghost"
+            >
+              Fluxo
+              <span className="grid min-w-5 place-items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                {activeTickets.length + resolvedTotal}
+              </span>
+            </Button>
+            <Button
+              aria-controls="kanban-archived-panel"
+              aria-selected={mode === "archived"}
+              className={cn(
+                "h-7 min-w-0 flex-1 gap-1.5 px-2.5 text-xs sm:flex-none",
+                mode === "archived" && "bg-background text-primary shadow-sm hover:bg-background",
+              )}
+              id="kanban-archived-tab"
+              onClick={() => switchMode("archived")}
+              onKeyDown={(event) => handleTabKeyDown(event, "archived")}
+              ref={archivedTabRef}
+              role="tab"
+              tabIndex={mode === "archived" ? 0 : -1}
+              type="button"
+              variant="ghost"
+            >
+              <Archive size={13} /> Arquivados
+              {archivedLoaded ? (
+                <span className="grid min-w-5 place-items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                  {archivedTotal}
+                </span>
+              ) : null}
+            </Button>
+          </div>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {canCreateTicket ? (
@@ -587,9 +786,7 @@ export function KanbanView({
                     <SelectValue placeholder={categoryFacetLabels[facet]} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">
-                      Todos os {categoryFacetLabels[facet].toLowerCase()}s
-                    </SelectItem>
+                    <SelectItem value="all">{categoryFacetAllLabels[facet]}</SelectItem>
                     <SelectItem value="none">
                       Sem {categoryFacetLabels[facet].toLowerCase()}
                     </SelectItem>
@@ -616,58 +813,91 @@ export function KanbanView({
               Limpar filtros
             </Button>
           ) : null}
-          <div
-            aria-label="Visão do Kanban"
-            className="inline-flex h-9 w-full min-w-0 items-center gap-1 rounded-lg border border-border bg-muted p-1 sm:w-auto"
-            role="tablist"
+          <Button
+            aria-pressed={selectionMode}
+            className="h-9 w-full text-xs sm:w-auto"
+            disabled={
+              bulkBusy ||
+              (mode === "active"
+                ? !resolvedLoaded || resolvedLoading || (!resolvedTickets.length && !visibleCancelledTickets.length)
+                : archivedLoading || !archivedTickets.length)
+            }
+            onClick={toggleSelectionMode}
+            size="default"
+            type="button"
+            variant={selectionMode ? "secondary" : "outline"}
           >
-            <Button
-              aria-controls="kanban-active-panel"
-              aria-selected={mode === "active"}
-              className={cn(
-                "h-7 min-w-0 flex-1 gap-1.5 px-2.5 text-xs sm:flex-none",
-                mode === "active" && "bg-background text-primary shadow-sm hover:bg-background",
-              )}
-              id="kanban-active-tab"
-              onClick={() => switchMode("active")}
-              onKeyDown={(event) => handleTabKeyDown(event, "active")}
-              ref={activeTabRef}
-              role="tab"
-              tabIndex={mode === "active" ? 0 : -1}
-              type="button"
-              variant="ghost"
-            >
-              Fluxo
-              <span className="grid min-w-5 place-items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
-                {activeTickets.length + resolvedTotal}
-              </span>
-            </Button>
-            <Button
-              aria-controls="kanban-archived-panel"
-              aria-selected={mode === "archived"}
-              className={cn(
-                "h-7 min-w-0 flex-1 gap-1.5 px-2.5 text-xs sm:flex-none",
-                mode === "archived" && "bg-background text-primary shadow-sm hover:bg-background",
-              )}
-              id="kanban-archived-tab"
-              onClick={() => switchMode("archived")}
-              onKeyDown={(event) => handleTabKeyDown(event, "archived")}
-              ref={archivedTabRef}
-              role="tab"
-              tabIndex={mode === "archived" ? 0 : -1}
-              type="button"
-              variant="ghost"
-            >
-              <Archive size={13} /> Arquivados
-              {archivedLoaded ? (
-                <span className="grid min-w-5 place-items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
-                  {archivedTotal}
-                </span>
-              ) : null}
-            </Button>
-          </div>
+            {selectionMode ? <X size={14} /> : <ListChecks size={14} />}
+            {selectionMode
+              ? "Cancelar seleção"
+              : mode === "active"
+                ? "Selecionar encerrados"
+                : "Selecionar para restaurar"}
+          </Button>
         </div>
       </Card>
+
+      {selectionMode ? (
+        <Card
+          aria-label="Ações para os tickets selecionados"
+          className="mb-3 flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 shadow-sm"
+          role="region"
+          variant="unstyled"
+        >
+          <span className="text-sm text-foreground">
+            <b className="text-base text-primary">{selectedVisibleIds.length}</b>{" "}
+            {selectedVisibleIds.length === 1 ? "selecionado" : "selecionados"}
+            <small className="text-xs text-muted-foreground"> de {KANBAN_BULK_SELECTION_LIMIT}</small>
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={
+                bulkBusy ||
+                !selectableTickets.length ||
+                (mode === "active" && resolvedLoading) ||
+                (mode === "archived" && archivedLoading)
+              }
+              onClick={toggleAllVisible}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {allVisibleSelected ? "Desmarcar todos" : "Selecionar todos os visíveis"}
+            </Button>
+            <Button
+              disabled={
+                bulkBusy ||
+                !selectedVisibleIds.length ||
+                (mode === "active" && (!resolvedLoaded || resolvedLoading)) ||
+                (mode === "archived" && archivedLoading)
+              }
+              onClick={() => void runBulkAction()}
+              size="sm"
+              type="button"
+              variant="default"
+            >
+              {bulkBusy
+                ? <LoaderCircle className="animate-spin" size={14} />
+                : mode === "active" ? <Archive size={14} /> : <ArchiveRestore size={14} />}
+              {bulkBusy
+                ? "Atualizando…"
+                : mode === "active"
+                  ? `Arquivar ${selectedVisibleIds.length || ""}`
+                  : `Restaurar ${selectedVisibleIds.length || ""}`}
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+      {selectionNotice ? (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
+          {selectionNotice}
+        </p>
+      ) : null}
+      {bulkError ? (
+        <p className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+          {bulkError}
+        </p>
+      ) : null}
 
       {mode === "active" ? (
         <div
@@ -702,7 +932,7 @@ export function KanbanView({
             return (
               <section
                 className={cn(
-                  "min-w-0 overflow-hidden rounded-xl border border-border bg-muted/70 transition-[border-color,box-shadow]",
+                  "min-w-0 overflow-hidden rounded-xl border border-border bg-linear-to-br from-primary/13 via-card to-primary/[6.5%] transition-[border-color,box-shadow]",
                   dropTarget === column.id && "border-primary/50 shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_12%,transparent)]",
                 )}
                 key={column.id}
@@ -732,12 +962,14 @@ export function KanbanView({
                 </header>
                 <div className="grid min-h-40 gap-2 p-2">
                   {visibleColumnTickets.map((ticket) => (
-                    <KanbanCard
-                      assignees={assignees}
-                      assigning={assigningTicketId === ticket.id}
-                      canAssign={canAssignTicket}
-                      columnId={column.id}
-                      currentUserId={currentUserId}
+                  <KanbanCard
+                    assignees={assignees}
+                    assigning={assigningTicketId === ticket.id}
+                    archiving={archivingIds.has(ticket.id)}
+                    busy={bulkBusy || (selectionMode && column.id === "done" && resolvedLoading)}
+                    canAssign={canAssignTicket}
+                    columnId={column.id}
+                    currentUserId={currentUserId}
                       key={ticket.id}
                       mode="active"
                       onDragEnd={() => setDropTarget(null)}
@@ -748,9 +980,12 @@ export function KanbanView({
                       onOpen={() => onOpenTicket(ticket.id)}
                       onAssign={async (assigneeId) => {
                         const updated = await onAssignTicket(ticket.id, assigneeId);
-                        if (updated && column.id === "done") void loadResolved(true);
+                      if (updated && column.id === "done") void loadResolved(true);
                         return updated;
                       }}
+                      onToggle={() => toggleTicket(ticket.id)}
+                      selectable={selectionMode && (column.id === "done" || column.id === "cancelled")}
+                      selected={selectedIds.has(ticket.id)}
                       ticket={ticket}
                     />
                   ))}
@@ -773,7 +1008,7 @@ export function KanbanView({
                   {hasLoadedColumnTickets || hasRemoteResolvedTickets ? (
                     <Button
                       className="w-full text-xs"
-                      disabled={column.id === "done" && resolvedLoading}
+                      disabled={bulkBusy || (column.id === "done" && resolvedLoading)}
                       onClick={() => {
                         setColumnLimits((current) => ({
                           ...current,
@@ -822,7 +1057,7 @@ export function KanbanView({
           {archivedError ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
               <span>{archivedError}</span>
-              <Button disabled={archivedLoading} onClick={() => void loadArchived(true)} size="sm" type="button" variant="outline"><RefreshCw size={13} /> Tentar novamente</Button>
+              <Button disabled={archivedLoading || bulkBusy} onClick={() => void loadArchived(true)} size="sm" type="button" variant="outline"><RefreshCw size={13} /> Tentar novamente</Button>
             </div>
           ) : null}
           {archivedLoading && !archivedLoaded ? <LoadingState label="Carregando arquivados…" /> : null}
@@ -845,11 +1080,16 @@ export function KanbanView({
                 <KanbanCard
                   assignees={assignees}
                   assigning={assigningTicketId === ticket.id}
+                  archiving={archivingIds.has(ticket.id)}
+                  busy={bulkBusy || (selectionMode && archivedLoading)}
                   canAssign={canAssignTicket}
                   currentUserId={currentUserId}
                   key={ticket.id}
                   mode="archived"
                   onOpen={() => onOpenTicket(ticket.id)}
+                  onToggle={() => toggleTicket(ticket.id)}
+                  selectable={selectionMode}
+                  selected={selectedIds.has(ticket.id)}
                   onAssign={async (assigneeId) => {
                     const updated = await onAssignTicket(ticket.id, assigneeId);
                     if (updated) void loadArchived(true);
@@ -866,7 +1106,7 @@ export function KanbanView({
           ) ? (
             <Button
               className="mx-auto mt-4 min-w-45"
-              disabled={archivedLoading}
+              disabled={archivedLoading || bulkBusy}
               onClick={() => {
                 setArchivedVisibleCount((current) => current + KANBAN_PAGE_SIZE);
                 if (

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFrontendFile as readFile } from "./helpers/frontend-source.js";
 import type { TicketCategory, TicketSummary } from "../app/lib/types.js";
+import { categoryFacetAllLabels } from "../app/lib/category-facets.js";
 
 import {
   getKanbanFilterOptions,
@@ -43,6 +44,17 @@ test("Kanban filtra tickets pela categoria selecionada em cada faceta", () => {
   assert.equal(matchesKanbanCategoryFilters(item, { symptom: "none" }), true);
   assert.equal(matchesKanbanCategoryFilters(ticket([]), { reason: "none" }), true);
   assert.equal(matchesKanbanCategoryFilters(item, { reason: "all" }), true);
+});
+
+test("rótulos de filtro usam o plural correto em cada faceta", () => {
+  assert.deepEqual(categoryFacetAllLabels, {
+    reason: "Todos os motivos",
+    product: "Todos os produtos",
+    platform: "Todas as plataformas",
+    symptom: "Todos os sintomas",
+    root_cause: "Todas as causas raiz",
+    resolution: "Todas as resoluções",
+  });
 });
 
 test("Kanban sempre expõe facetas principais e inclui demais facetas com categorias", () => {
@@ -92,10 +104,7 @@ test("barra do Kanban integra filtros de responsável e categorias", async () =>
     view,
     /aria-label=\{`Filtrar tickets por \$\{categoryFacetLabels\[facet\]\}`\}/,
   );
-  assert.match(
-    view,
-    /Todos os \{categoryFacetLabels\[facet\]\.toLowerCase\(\)\}s/,
-  );
+  assert.match(view, /categoryFacetAllLabels\[facet\]/);
   assert.match(view, /Sem \{categoryFacetLabels\[facet\]\.toLowerCase\(\)\}/);
   assert.match(view, /value="none"/);
   assert.match(view, /matchesCategories\(ticket\)/);

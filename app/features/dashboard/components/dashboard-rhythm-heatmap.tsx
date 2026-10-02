@@ -19,6 +19,7 @@ export function DashboardRhythmHeatmap({
   referenceDate: string;
 }) {
   const heatmap = useMemo(() => buildDashboardHeatmap(data, { referenceDate }), [data, referenceDate]);
+  const minGridWidth = Math.max(0, heatmap.weeks.length * 12 + (heatmap.weeks.length - 1) * 4);
   const [activeDay, setActiveDay] = useState<ActiveDay | null>(null);
 
   function updateActiveDay(element: HTMLButtonElement, x: number, y: number) {
@@ -32,8 +33,13 @@ export function DashboardRhythmHeatmap({
 
   return (
     <>
-      <div className="min-w-0 pb-1">
-        <div className="flex w-full flex-col gap-3">
+      <div
+        aria-label="Mapa anual de atendimento"
+        className="min-w-0 overflow-x-auto overscroll-x-contain pb-1"
+        role="region"
+        tabIndex={0}
+      >
+        <div className="flex w-full flex-col gap-3" style={{ minWidth: `${minGridWidth}px` }}>
           <div className="relative h-4 w-full">
             {heatmap.labels.map((label) => (
               <span
@@ -63,7 +69,7 @@ export function DashboardRhythmHeatmap({
                   });
             }}
             role="group"
-            style={{ gridTemplateColumns: `repeat(${heatmap.weeks.length}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${heatmap.weeks.length}, minmax(12px, 1fr))` }}
           >
             {heatmap.weeks.flatMap((week) => week.map((day) => {
               const intensity = Math.min(day.resolved, 25) * 4;

@@ -18,6 +18,7 @@ import type {
   CreateCategoryInput,
   DeleteCategoryInput,
   DeleteCategoryResponse,
+  UpdateCategoryInput,
   TicketCategoryAttachInput,
   TicketAssigneeDto,
   TriageAiSettingsDto,
@@ -138,12 +139,18 @@ async function apiResponseError(response: Response): Promise<ApiError> {
 function dashboardPath(
   path: string,
   range: DashboardDateRange,
-  assigneeId = "all",
+  assigneeId: string | readonly string[] = "all",
 ): string {
   const params = new URLSearchParams();
   if (range.from) params.set("from", range.from);
   if (range.to) params.set("to", range.to);
-  if (assigneeId !== "all") params.set("assigneeId", assigneeId);
+  if (typeof assigneeId === "string") {
+    if (assigneeId !== "all") params.set("assigneeId", assigneeId);
+  } else {
+    [...new Set(assigneeId)].toSorted().forEach((id) => {
+      params.append("assigneeId", id);
+    });
+  }
   const query = params.toString();
   return query ? `${path}?${query}` : path;
 }
@@ -191,6 +198,19 @@ export async function createCategory(
   });
 }
 
+export async function updateCategory(
+  categoryId: string,
+  input: UpdateCategoryInput,
+): Promise<CategoryCatalogDto> {
+  return request<CategoryCatalogDto>(
+    `/api/categories/${encodeURIComponent(categoryId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export async function deleteCategory(
   categoryId: string,
   input: DeleteCategoryInput = {},
@@ -231,7 +251,7 @@ export async function detachCategoryFromTicket(
 
 export async function getDashboard(
   range: DashboardDateRange = {},
-  assigneeId = "all",
+  assigneeId: string | readonly string[] = "all",
 ): Promise<DashboardData> {
   return request<DashboardData>(
     dashboardPath("/api/dashboard", range, assigneeId),
@@ -240,7 +260,7 @@ export async function getDashboard(
 
 export async function getDashboardExport(
   range: DashboardDateRange = {},
-  assigneeId = "all",
+  assigneeId: string | readonly string[] = "all",
 ): Promise<{ blob: Blob; fileName: string }> {
   let response: Response;
   try {
@@ -330,6 +350,21 @@ export async function getResolvedTickets(
     offset: String(options.offset ?? 0),
   });
   return request<TicketListResponse>(`/api/tickets?${params}`);
+}
+
+export async function bulkUpdateTicketStatus(
+  ticketIds: string[],
+  status: "archived" | "resolved",
+): Promise<TicketSummary[]> {
+  const result = await request<{
+    tickets: TicketSummary[];
+    action: string;
+    changedAt: string;
+  }>("/api/tickets/bulk-status", {
+    method: "POST",
+    body: JSON.stringify({ ticketIds, status }),
+  });
+  return result.tickets;
 }
 
 export async function getConversations(

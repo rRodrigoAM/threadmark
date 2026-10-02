@@ -82,7 +82,7 @@ export function AutomationNode({ data, selected }: NodeProps<AutomationFlowNode>
   return (
     <div
       className={cn(
-        "group relative w-[250px] rounded-xl border bg-card p-3 text-foreground shadow-sm transition-[box-shadow,border-color]",
+        "group relative w-[250px] rounded-xl border bg-white p-3 text-foreground shadow-sm transition-[box-shadow,border-color] dark:bg-[#151E2B]",
         selected && "border-primary shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary),transparent_82%)]",
         data.invalid && "border-destructive/70",
         !data.invalid && data.warning && "border-amber-400/70",
