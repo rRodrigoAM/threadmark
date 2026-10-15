@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/app/components/ui/select";
 import {
   createIntegrationCredential,
   getIntegrationCredentials,
@@ -19,6 +18,7 @@ import {
   Notice,
   SectionLayout,
 } from "../settings-support";
+import { CliSetupGuide } from "./cli-setup-guide";
 
 export function IntegrationCredentialsSection({
   canManage,
@@ -28,8 +28,7 @@ export function IntegrationCredentialsSection({
   onFeedback(tone: "success" | "error", message: string): void;
 }) {
   const [credentials, setCredentials] = useState<IntegrationCredential[]>([]);
-  const [name, setName] = useState("Hermes no Mac");
-  const [clientId, setClientId] = useState<"hermes" | "threadmark-cli">("hermes");
+  const [name, setName] = useState("CLI no meu computador");
   const [expiresOn, setExpiresOn] = useState(defaultExpiryDate());
   const [issuedToken, setIssuedToken] = useState<{
     credentialId: string;
@@ -67,14 +66,16 @@ export function IntegrationCredentialsSection({
     try {
       const issued = await createIntegrationCredential({
         name,
-        clientId,
         expiresAt: expiresOn ? `${expiresOn}T23:59:59.000Z` : null,
       });
       setCredentials((current) => [
         issued.credential,
         ...current.filter((item) => item.id !== issued.credential.id),
       ]);
-      setIssuedToken({ credentialId: issued.credential.id, token: issued.token });
+      setIssuedToken({
+        credentialId: issued.credential.id,
+        token: issued.token,
+      });
       setReferenceTime(Date.now());
       onFeedback(
         "success",
@@ -117,36 +118,21 @@ export function IntegrationCredentialsSection({
 
   return (
     <SectionLayout
-      description="Credenciais revogáveis para a CLI acessar somente as operações headless pela API HTTPS."
+      description="Conecte o Codex ou outro agente ao Threadmark pela linha de comando."
       icon={KeyRound}
-      title="CLI e Hermes"
+      title="CLI"
     >
       <div className="space-y-5">
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_170px_180px_auto] md:items-end">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-end">
           <Field label="Nome da credencial">
             <Input
               className={inputClass}
               disabled={!canManage}
               maxLength={100}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Hermes no Mac"
+              placeholder="Ex.: Codex no meu computador"
               value={name}
             />
-          </Field>
-          <Field label="Cliente autorizado">
-            <Select
-              disabled={!canManage}
-              onValueChange={(value) => setClientId(value as "hermes" | "threadmark-cli")}
-              value={clientId}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hermes">Hermes</SelectItem>
-                <SelectItem value="threadmark-cli">CLI manual</SelectItem>
-              </SelectContent>
-            </Select>
           </Field>
           <Field label="Expira em">
             <Input
@@ -166,31 +152,37 @@ export function IntegrationCredentialsSection({
             Criar credencial
           </Button>
         </div>
+        <p className="text-xs leading-5 text-muted-foreground">
+          Use a mesma CLI com Codex ou qualquer outro agente. Após criar a credencial, você verá o token e as instruções de conexão.
+        </p>
 
         {issuedToken ? (
-          <Notice tone="success" title="Copie este token agora">
-            <p className="mb-3 text-xs">
-              O servidor guarda somente o hash. Depois de sair desta tela, o valor não poderá ser recuperado.
-            </p>
-            <div className="flex gap-2">
-              <Input
-                aria-label="Token de integração emitido"
-                className={`${inputClass} font-mono text-xs`}
-                readOnly
-                value={issuedToken.token}
-              />
-              <Button onClick={() => void copyToken()} type="button" variant="outline">
-                <Copy size={15} /> Copiar
-              </Button>
-            </div>
-          </Notice>
+          <div className="space-y-5">
+            <Notice tone="success" title="Copie este token agora">
+              <p className="mb-3 text-xs">
+                Este token aparece uma única vez. Copie agora e siga as instruções de conexão abaixo.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  aria-label="Token de integração emitido"
+                  className={`${inputClass} font-mono text-xs`}
+                  readOnly
+                  value={issuedToken.token}
+                />
+                <Button onClick={() => void copyToken()} type="button" variant="outline">
+                  <Copy size={15} /> Copiar
+                </Button>
+              </div>
+            </Notice>
+            <CliSetupGuide onFeedback={onFeedback} />
+          </div>
         ) : null}
 
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <div className="border-b border-border/70 px-5 py-4">
             <h3 className="font-semibold text-foreground">Credenciais desta conta</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Cada credencial opera como seu usuário, limitada às rotas headless do Threadmark.
+              Cada credencial usa as permissões da sua conta para consultar e gerenciar atendimentos pela CLI.
             </p>
           </div>
           {loading ? (
@@ -219,7 +211,7 @@ export function IntegrationCredentialsSection({
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {credential.clientId === "hermes" ? "Hermes" : "CLI manual"} · Expira em {formatDate(credential.expiresAt)}
+                        CLI · Expira em {formatDate(credential.expiresAt)}
                         {credential.lastUsedAt ? ` · Último uso ${formatDate(credential.lastUsedAt)}` : " · Ainda não utilizada"}
                       </p>
                     </div>
