@@ -238,26 +238,30 @@ export function GeneralSection({
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-2 pl-[52px] sm:pl-0">
-                  <button
-                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  <Button
+                    className="rounded-lg px-3 py-1.5 text-muted-foreground hover:border-primary/40"
                     onClick={() => setDraft((current) => ({
                       ...current,
                       workSchedule: selectWorkDays(current.workSchedule, [1, 2, 3, 4, 5]),
                     }))}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
                     Seg a sex
-                  </button>
-                  <button
-                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  </Button>
+                  <Button
+                    className="rounded-lg px-3 py-1.5 text-muted-foreground hover:border-primary/40"
                     onClick={() => setDraft((current) => ({
                       ...current,
                       workSchedule: selectWorkDays(current.workSchedule, WEEK_DAYS.map((day) => day.value)),
                     }))}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
                     Todos os dias
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -267,14 +271,14 @@ export function GeneralSection({
                   {WEEK_DAYS.map((day) => {
                     const selected = draft.workSchedule.days.some((entry) => entry.dayOfWeek === day.value);
                     return (
-                      <button
+                      <Button
                         aria-label={`${day.label}, ${selected ? "selecionado" : "não selecionado"}`}
                         aria-pressed={selected}
                         className={cn(
-                          "inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border px-2 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          "h-10 rounded-xl px-2 text-sm transition-all",
                           selected
-                            ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                            : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                            ? "border-primary shadow-sm"
+                            : "text-muted-foreground hover:border-primary/40",
                         )}
                         key={day.value}
                         onClick={() => setDraft((current) => {
@@ -287,11 +291,13 @@ export function GeneralSection({
                             workSchedule: selectWorkDays(current.workSchedule, nextDays),
                           };
                         })}
+                        size="default"
                         type="button"
+                        variant={selected ? "default" : "outline"}
                       >
                         {selected ? <Check aria-hidden="true" size={14} strokeWidth={2.5} /> : null}
                         {day.short}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -382,12 +388,9 @@ export function GeneralSection({
                                   />
                                 </span>
                               </label>
-                              <button
+                              <Button
                                 aria-label={`Remover período ${periodIndex + 1} de ${day.label}`}
-                                className={cn(
-                                  "mb-0.5 grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                  daySchedule.periods.length === 1 && "invisible",
-                                )}
+                                className={cn("mb-0.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive", daySchedule.periods.length === 1 && "invisible")}
                                 disabled={daySchedule.periods.length === 1}
                                 onClick={() => setDraft((current) => ({
                                   ...current,
@@ -396,10 +399,12 @@ export function GeneralSection({
                                     periods: entry.periods.filter((_, index) => index !== periodIndex),
                                   })),
                                 }))}
+                                size="icon"
                                 type="button"
+                                variant="ghost"
                               >
                                 <Trash2 aria-hidden="true" size={15} />
-                              </button>
+                              </Button>
                             </div>
                           );
                         })}
